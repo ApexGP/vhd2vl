@@ -979,8 +979,8 @@ design_unit : rem entity rem architecture rem {
           sl=addsl(sl,$2);
           sl=addsl(sl,$3);
           sl=addsl(sl,$4);
-          sl=addsl(sl,$5);
           sl=addtxt(sl,"\nendmodule\n");
+          sl=addsl(sl,$5);
           $$=sl;
         }
 /* some people put entity declarations and architectures in separate files -
@@ -991,16 +991,16 @@ design_unit : rem entity rem architecture rem {
         slist *sl;
           sl=output_timescale($1);
           sl=addsl(sl,$2);
-          sl=addsl(sl,$3);
           sl=addtxt(sl,"\nendmodule\n");
+          sl=addsl(sl,$3);
           $$=sl;
         }
       | rem architecture rem {
         slist *sl;
           sl=output_timescale($1);
           sl=addsl(sl,$2);
-          sl=addsl(sl,$3);
           sl=addtxt(sl,"\nendmodule\n");
+          sl=addsl(sl,$3);
           $$=sl;
         }
       ;
