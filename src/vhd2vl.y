@@ -321,15 +321,40 @@ slist *addsl(slist *sl, slist *sl2){
 }
 
 slist *addvec(slist *sl, char *s){
-  sl=addval(sl,strlen(s));
+  int len = strlen(s);
+  int i;
+  
+  /* Handle empty string - return NULL to avoid generating "0'b" */
+  if (len == 0) {
+    return sl;
+  }
+  
+  sl=addval(sl,len);
   sl=addtxt(sl,"'b");
-  sl=addtxt(sl,s);
+  
+  /* Convert VHDL don't care '-' to Verilog 'x' */
+  char *converted = malloc(len + 1);
+  for (i = 0; i < len; i++) {
+    converted[i] = (s[i] == '-') ? 'x' : s[i];
+  }
+  converted[len] = '\0';
+  
+  sl=addtxt(sl,converted);
+  free(converted);
   return sl;
 }
 
 slist *addvec_base(slist *sl, char *b, char *s){
   const char *base_str="'b";
   int base_mult=1;
+  int len = strlen(s);
+  int i;
+  
+  /* Handle empty string */
+  if (len == 0) {
+    return sl;
+  }
+  
   if (strcasecmp(b,"B") == 0) {
      /* nothing to do */
   } else if (strcasecmp(b,"X") == 0) {
@@ -339,9 +364,21 @@ slist *addvec_base(slist *sl, char *b, char *s){
   } else {
      fprintf(stderr,"WARNING (line %d): NAME STRING rule matched but NAME='%s' is not X or O.\n", lineno, b);
   }
-  sl=addval(sl,strlen(s)*base_mult);
+  sl=addval(sl,len*base_mult);
   sl=addtxt(sl,base_str);
-  sl=addtxt(sl,s);
+  
+  /* Convert VHDL don't care '-' to Verilog 'x' for binary strings */
+  if (strcasecmp(b,"B") == 0) {
+    char *converted = malloc(len + 1);
+    for (i = 0; i < len; i++) {
+      converted[i] = (s[i] == '-') ? 'x' : s[i];
+    }
+    converted[len] = '\0';
+    sl=addtxt(sl,converted);
+    free(converted);
+  } else {
+    sl=addtxt(sl,s);
+  }
   return sl;
 }
 
@@ -362,15 +399,12 @@ slist *addpar_snug(slist *sl, vrange *v){
     sl=addtxt(sl,"[");
     if(v->nhi != NULL){
       sl=addsl(sl,v->nhi);
-      if(v->updown) sl=addtxt(sl,v->updown==1 ? " +: " : " -: ");
-      else sl=addtxt(sl,":");
+      /* Don't use +: or -: syntax for signal declarations with updown,
+       * as it produces invalid Verilog when indices contain expressions.
+       * Fall back to standard [hi:lo] syntax. */
+      sl=addtxt(sl,":");
     }
-    if(v->updown){
-      sl=addsl(sl,v->size_expr);
-      sl=addtxt(sl," + 1");
-    } else {
-      sl=addsl(sl,v->nlo);
-    }
+    sl=addsl(sl,v->nlo);
     sl=addtxt(sl,"]");
   }
   return sl;
@@ -2443,12 +2477,30 @@ expr : signal {
          }
      | expr '&' expr { /* Vector chaining a.k.a. bit concatenation */
          slist *sl;
-           sl=addtxt($1->sl,",");
-           sl=addsl(sl,$3->sl);
-           free($3);
-           $1->op='c';
-           $1->sl=sl;
-           $$=$1;
+           /* Handle empty operands from empty strings */
+           if ($1->sl == NULL && $3->sl == NULL) {
+             /* Both empty, result is empty */
+             $1->op='c';
+             $1->sl=NULL;
+             $$=$1;
+             free($3);
+           } else if ($1->sl == NULL) {
+             /* Left empty, use right */
+             $$=$3;
+             free($1);
+           } else if ($3->sl == NULL) {
+             /* Right empty, use left */
+             $$=$1;
+             free($3);
+           } else {
+             /* Both non-empty, concatenate normally */
+             sl=addtxt($1->sl,",");
+             sl=addsl(sl,$3->sl);
+             free($3);
+             $1->op='c';
+             $1->sl=sl;
+             $$=$1;
+           }
          }
      | '-' expr %prec UMINUS {$$=addexpr(NULL,'m'," -",$2);}
      | '+' expr %prec UPLUS {$$=addexpr(NULL,'p'," +",$2);}
@@ -2535,8 +2587,16 @@ expr : signal {
        $$ = addnest($3);
       }
      | CONVFUNC_2 '(' expr ',' expr ')' {
-       /* two argument type conversion e.g. to_unsigned(x, 3) */
-       $$ = addnest($3);
+       /* two argument type conversion e.g. conv_std_logic_vector(127, 10)
+        * Just use $unsigned() to ensure proper treatment in concatenations.
+        * The width will be inferred from context. */
+       expdata *result = xmalloc(sizeof(expdata));
+       result->op = 't';
+       result->sl = NULL;
+       result->sl = addtxt(result->sl, "$unsigned(");
+       result->sl = addsl(result->sl, $3->sl);
+       result->sl = addtxt(result->sl, ")");
+       $$ = result;
       }
      | '(' expr ')' {
        $$ = addnest($2);
