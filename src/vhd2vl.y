@@ -68,6 +68,7 @@ char *xstrdup(const char *s) {
 
 int skipRem = 0;
 int lineno=1;
+int timescale_emitted=0;  /* Track if timescale has been output */
 
 sglist *io_list=NULL;
 sglist *sig_list=NULL;
@@ -805,14 +806,17 @@ static void set_timescale(const char *s)
 
 slist *output_timescale(slist *sl)
 {
-    if (time_unit[0] != 0) {
-        sl = addtxt(sl, "`timescale 1 ");
-        sl = addtxt(sl, time_unit);
-        sl = addtxt(sl, "s / 1 ");
-        sl = addtxt(sl, time_unit);
-        sl = addtxt(sl, "s\n");
-    } else {
-        sl = addtxt(sl, "// no timescale needed\n");
+    if (!timescale_emitted) {
+        if (time_unit[0] != 0) {
+            sl = addtxt(sl, "`timescale 1 ");
+            sl = addtxt(sl, time_unit);
+            sl = addtxt(sl, "s / 1 ");
+            sl = addtxt(sl, time_unit);
+            sl = addtxt(sl, "s\n");
+        } else {
+            sl = addtxt(sl, "// no timescale needed\n");
+        }
+        timescale_emitted = 1;
     }
     return sl;
 }
@@ -898,6 +902,7 @@ slist *emit_io_list(slist *sl)
 %token <n> NATURAL
 
 %type <n> trad
+%type <sl> design_units design_unit
 %type <sl> rem  remlist entity
 %type <sl> portlist genlist architecture
 %type <sl> a_decl a_body p_decl oname
@@ -941,7 +946,8 @@ slist *emit_io_list(slist *sl)
 
 /* rule for "...ELSE IF edge THEN..." causes 1 shift/reduce conflict */
 /* rule for opt_begin causes 1 shift/reduce conflict */
-%expect 2
+/* recursive design_units rule may cause additional conflicts */
+%expect 3
 
 /* glr-parser is needed because processes can start with if statements, but
  * not have edges in them - more than one level of look-ahead is needed in that case
@@ -950,37 +956,51 @@ slist *emit_io_list(slist *sl)
  */
 %%
 
-/* Input file must contain entity declaration followed by architecture */
-trad  : rem entity rem architecture rem {
+/* Input file can contain one or more entity-architecture pairs */
+trad : design_units rem {
         slist *sl;
-          sl=output_timescale($1);
-          sl=addsl(sl,$2);
-          sl=addsl(sl,$3);
-          sl=addsl(sl,$4);
-          sl=addsl(sl,$5);
-          sl=addtxt(sl,"\nendmodule\n");
+          sl=addsl($1,$2);
           slprint(sl);
           $$=0;
+        }
+      ;
+
+design_units : design_unit {
+          $$=$1;
+        }
+      | design_units design_unit {
+        slist *sl;
+          sl=addsl($1,$2);
+          $$=sl;
         }
 /* some people put entity declarations and architectures in separate files -
  * translate each piece - note that this will not make a legal Verilog file
  * - let them take care of that manually
  */
-      | rem entity rem  {
+      | rem entity {
         slist *sl;
-          sl=addsl($1,$2);
-          sl=addsl(sl,$3);
-          sl=addtxt(sl,"\nendmodule\n");
-          slprint(sl);
-          $$=0;
+          sl=output_timescale($1);
+          sl=addsl(sl,$2);
+          sl=addtxt(sl,"\nendmodule  // incomplete: entity-only\n");
+          $$=sl;
         }
-      | rem architecture rem {
+      | rem architecture {
         slist *sl;
-          sl=addsl($1,$2);
+          sl=output_timescale($1);
+          sl=addsl(sl,$2);
+          sl=addtxt(sl,"\nendmodule  // incomplete: architecture-only\n");
+          $$=sl;
+        }
+      ;
+
+design_unit : rem entity rem architecture {
+        slist *sl;
+          sl=output_timescale($1);
+          sl=addsl(sl,$2);
           sl=addsl(sl,$3);
+          sl=addsl(sl,$4);
           sl=addtxt(sl,"\nendmodule\n");
-          slprint(sl);
-          $$=0;
+          $$=sl;
         }
       ;
 
@@ -2204,6 +2224,18 @@ mvalue : STRING {$$=addvec(NULL,$1);}
              $$=addtxt($$,"}}");
              fprintf(stderr,"WARNING (line %d): broken width on port with OTHERS.\n",lineno);
            }
+       | BITVECT '(' expr ')' {
+             /* Type conversion function in port map */
+             $$=addsl(NULL,$3->sl);
+           }
+       | CONVFUNC_1 '(' expr ')' {
+             /* Type conversion function in port map */
+             $$=addsl(NULL,$3->sl);
+           }
+       | CONVFUNC_2 '(' expr ',' expr ')' {
+             /* Two-argument type conversion in port map */
+             $$=addsl(NULL,$3->sl);
+           }
        ;
 
 
@@ -2367,6 +2399,46 @@ expr : signal {
            e->op='o'; /* others */
            e->sl=addothers(NULL,$5->sl);
            $$=e;
+         }
+     | '(' expr DOWNTO expr '=' '>' expr ')' {
+         /* Aggregate expression: (high downto low => value) */
+         /* Translates to Verilog: {width{value}} */
+         expdata *e;
+         slist *sl;
+         e=xmalloc(sizeof(expdata));
+         e->op='t'; /* Terminal symbol */
+         sl=addtxt(NULL,"{(");
+         sl=addsl(sl,$2->sl);
+         sl=addtxt(sl,")-(");
+         sl=addsl(sl,$4->sl);
+         sl=addtxt(sl,")+1{");
+         sl=addsl(sl,$7->sl);
+         sl=addtxt(sl,"}}");
+         e->sl=sl;
+         free($2);
+         free($4);
+         free($7);
+         $$=e;
+         }
+     | '(' expr TO expr '=' '>' expr ')' {
+         /* Aggregate expression: (low to high => value) */
+         /* Translates to Verilog: {width{value}} */
+         expdata *e;
+         slist *sl;
+         e=xmalloc(sizeof(expdata));
+         e->op='t'; /* Terminal symbol */
+         sl=addtxt(NULL,"{(");
+         sl=addsl(sl,$4->sl);
+         sl=addtxt(sl,")-(");
+         sl=addsl(sl,$2->sl);
+         sl=addtxt(sl,")+1{");
+         sl=addsl(sl,$7->sl);
+         sl=addtxt(sl,"}}");
+         e->sl=sl;
+         free($2);
+         free($4);
+         free($7);
+         $$=e;
          }
      | expr '&' expr { /* Vector chaining a.k.a. bit concatenation */
          slist *sl;
@@ -2635,6 +2707,10 @@ simple_expr : signal {
          e->value=$1;
          e->sl=addval(NULL,$1);
          $$=e;
+      }
+     | '-' simple_expr %prec UMINUS {
+         /* Unary minus for simple_expr (needed for ranges like -1+23 downto 0) */
+         $$=addexpr(NULL,'m'," -",$2);
       }
      | NAME '\'' LEFT {
 	      /* lookup NAME and get its left */
