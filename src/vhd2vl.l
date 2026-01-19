@@ -37,6 +37,7 @@ extern int skipRem;
 void getstring(unsigned skip);
 void getbasedstring(unsigned skip);
 int scan_int(char *s);
+static void replace_dash(char *s);
 
 %}
 %%
@@ -163,9 +164,15 @@ int scan_int(char *s);
 
 "**"                              { return POW; }
 
-\"[ \!#-~]*\" |
-\'[01xz]\' {
+\"[ \!#-~]*\" {
   getstring(1);
+  replace_dash(yylval.txt);   /* map VHDL don't-care '-' in strings to Verilog 'x' */
+  return STRING;
+}
+
+\'[01xz-]\' {
+  getstring(1);
+  replace_dash(yylval.txt);   /* map VHDL don't-care '-' in bit chars to Verilog 'x' */
   return STRING;
 }
 
@@ -206,6 +213,17 @@ void getstring(unsigned skip){
   yytext[i]=0;
   yylval.txt=malloc(i+1);
   strcpy(yylval.txt, yytext+skip);
+  for (unsigned j = 0; yylval.txt[j] != 0; j++) {
+    if (yylval.txt[j] == '-') yylval.txt[j] = 'x';
+  }
+}
+
+static void replace_dash(char *s) {
+  /* normalize VHDL don't-care '-' to Verilog 'x' */
+  if (!s) return;
+  for (unsigned j = 0; s[j] != 0; j++) {
+    if (s[j] == '-') s[j] = 'x';
+  }
 }
 
 void getbasedstring(unsigned skip){
@@ -215,6 +233,7 @@ void getbasedstring(unsigned skip){
   yytext[i]=0;
   yylval.txt=malloc(i+1);
   strcpy(yylval.txt, yytext+skip);
+  replace_dash(yylval.txt);
 }
 
 int scan_int(char *s){
