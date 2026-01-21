@@ -1362,7 +1362,9 @@ vec_range : simple_expr updown simple_expr {
               } else if ((range_diff = slist_check_diff($$->nhi, $$->nlo, $2))) {
                 if (DEBUG_RANGE) fprintf(stderr, "difference: %s\n", range_diff);
                 $$->updown = $2;  /* triggers use of range_diff in addpar_snug */
-                $$->size_expr = addtxt(NULL, range_diff);
+                /* size_expr is width = (diff) + 1 */
+                $$->size_expr = addwrap("(", addtxt(NULL, range_diff), ")");
+                $$->size_expr = addtxt($$->size_expr, " + 1");
               } else {
                 /* make an expression to calculate the width of this vrange:
                  * create an expression that calculates:
@@ -2506,6 +2508,11 @@ expr : signal {
          }
      | expr '&' expr { /* Vector chaining a.k.a. bit concatenation */
          slist *sl;
+         int lhsw = ($1->op == 's' || $1->op == 'n') ? $1->value : -1;
+         int rhsw = ($3->op == 's' || $3->op == 'n') ? $3->value : -1;
+         /* Preserve concatenated width when both sides are sized literals/strings.
+          * If either side lacks width info, fall back to unknown (0) to avoid lying. 
+          */
            if ($1->op == 's' && $1->value == 0) {
              free($1);
              $$=$3;
@@ -2518,6 +2525,11 @@ expr : signal {
              free($3);
              $1->op='c';
              $1->sl=sl;
+             if (lhsw > 0 && rhsw > 0) {
+               $1->value = lhsw + rhsw;
+             } else {
+               $1->value = 0; /* unknown width */
+             }
              $$=$1;
            }
          }
