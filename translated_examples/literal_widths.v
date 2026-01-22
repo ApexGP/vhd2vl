@@ -3,15 +3,15 @@
 
 module literal_widths(
         input wire clk,
-        output wire [4'd11:1'd0] y
+        output wire [11:0] y
     );
 
 
 
 
     parameter c_hex = 8'hAB;  // expect 8'hAB
-    wire [3'd7:1'd0] s_neg;
-    wire [2'd3:1'd0] c_bin;
+    wire [7:0] s_neg;
+    wire [3:0] c_bin;
 
     // negative literal should emit sized signed constant
     assign s_neg =  -3'd5;

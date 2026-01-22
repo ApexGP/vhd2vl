@@ -371,6 +371,24 @@ slist *addnat_sized(int val){
   return sl;
 }
 
+/* For ranges in declarations, avoid sized literals like 5'd23/1'd0; emit unsized bounds */
+static slist *sanitize_range_bound(slist *bound) {
+  if (!bound) return NULL;
+  if (bound->type == tVAL) {
+    slist *p1 = bound->slst;
+    if (p1 && p1->type == tTXT && p1->data.txt &&
+        (strcmp(p1->data.txt, "'sd") == 0 || strcmp(p1->data.txt, "'d") == 0)) {
+      slist *p2 = p1->slst;
+      if (p2 && p2->type == tVAL && p2->slst == NULL) {
+        slist *out = NULL;
+        out = addval(out, bound->data.val);
+        return out;
+      }
+    }
+  }
+  return bound;
+}
+
 slist *addind(slist *sl){
   if(sl)
     sl=addsl(indents[indent],sl);
@@ -395,9 +413,11 @@ slist *addpar_snug(slist *sl, vrange *v){
     return sl;
   }
   if(v->nlo != NULL) {   /* indexes are simple expressions */
+    slist *nhi = sanitize_range_bound(v->nhi);
+    slist *nlo = sanitize_range_bound(v->nlo);
     sl=addtxt(sl,"[");
     if(v->nhi != NULL){
-      sl=addsl(sl,v->nhi);
+      sl=addsl(sl,nhi);
       if(v->updown) sl=addtxt(sl,v->updown==1 ? " +: " : " -: ");
       else sl=addtxt(sl,":");
     }
@@ -405,7 +425,7 @@ slist *addpar_snug(slist *sl, vrange *v){
       sl=addsl(sl,v->size_expr);
       sl=addtxt(sl," + 1");
     } else {
-      sl=addsl(sl,v->nlo);
+      sl=addsl(sl,nlo);
     }
     sl=addtxt(sl,"]");
   }
@@ -424,21 +444,25 @@ slist *addpar(slist *sl, vrange *v){
 /* This function handles array of vectors in signal lists */
 slist *addpar_snug2(slist *sl, vrange *v, vrange *v1){
   if(v->nlo != NULL) {   /* indexes are simple expressions */
+    slist *nhi = sanitize_range_bound(v->nhi);
+    slist *nlo = sanitize_range_bound(v->nlo);
     sl=addtxt(sl,"[");
     if(v->nhi != NULL){
-      sl=addsl(sl,v->nhi);
+      sl=addsl(sl,nhi);
       sl=addtxt(sl,":");
     }
-    sl=addsl(sl,v->nlo);
+    sl=addsl(sl,nlo);
     sl=addtxt(sl,"]");
   }
   if(v1->nlo != NULL) {   /* indexes are simple expressions */
+    slist *nhi = sanitize_range_bound(v1->nhi);
+    slist *nlo = sanitize_range_bound(v1->nlo);
     sl=addtxt(sl,"[");
     if(v1->nhi != NULL){
-      sl=addsl(sl,v1->nhi);
+      sl=addsl(sl,nhi);
       sl=addtxt(sl,":");
     }
-    sl=addsl(sl,v1->nlo);
+    sl=addsl(sl,nlo);
     sl=addtxt(sl,"]");
   }
   return sl;
@@ -446,12 +470,14 @@ slist *addpar_snug2(slist *sl, vrange *v, vrange *v1){
 
 slist *addpost(slist *sl, vrange *v){
   if(v->xlo != NULL) {
+    slist *xhi = sanitize_range_bound(v->xhi);
+    slist *xlo = sanitize_range_bound(v->xlo);
     sl=addtxt(sl,"[");
     if(v->xhi != NULL){
-      sl=addsl(sl,v->xhi);
+      sl=addsl(sl,xhi);
       sl=addtxt(sl,":");
     }
-    sl=addsl(sl,v->xlo);
+    sl=addsl(sl,xlo);
     sl=addtxt(sl,"]");
   }
   return sl;

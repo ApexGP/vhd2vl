@@ -3,14 +3,16 @@
 
 module concat_mxu(
         input wire clk,
-        input wire [5'd22:1'd0] Xfrac,
-        output wire [5'd23:1'd0] R
+        input wire [22:0] Xfrac,
+        output wire [23:0] R
     );
 
     // width 23
 
-    wire [5'd23:1'd0] mXu;
-    wire [5'd23:1'd0] fixX0;
+
+
+    wire [23:0] mXu;
+    wire [23:0] fixX0;
 
     // left side has implicit leading '1', expect width 24
     assign mXu = {1'b1,Xfrac};
