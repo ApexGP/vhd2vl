@@ -907,6 +907,7 @@ slist *emit_io_list(slist *sl)
 %type <sl> portlist genlist architecture
 %type <sl> a_decl a_body p_decl oname
 %type <sl> map_list map_item mvalue sigvalue
+%type <sl> aggregate_item aggregate_list
 %type <sl> generic_map_list generic_map_item
 %type <sl> conf exprc sign_list p_body optname gen_optname
 %type <sl> edge
@@ -2393,6 +2394,13 @@ expr : signal {
            e->sl=addvec_base(NULL,$1,$2);
            $$=e;
          }
+     | '(' aggregate_list ')' {
+        expdata *e;
+          e=xmalloc(sizeof(expdata));
+          e->op='t'; /* Terminal symbol */
+          e->sl=addwrap("{",$2,"}");
+          $$=e;
+        }
      | '(' OTHERS '=' '>' expr ')' {
          expdata *e;
            e=xmalloc(sizeof(expdata));
@@ -2541,6 +2549,57 @@ expr : signal {
        $$ = addnest($2);
       }
      ;
+
+aggregate_item : OTHERS '=' '>' expr {
+        $$=addothers(NULL,$4->sl);
+      }
+    | expr DOWNTO expr '=' '>' expr {
+        /* Aggregate expression: (high downto low => value) */
+        /* Translates to Verilog: {width{value}} */
+        slist *sl;
+        sl=addtxt(NULL,"{(");
+        sl=addsl(sl,$1->sl);
+        sl=addtxt(sl,")-(");
+        sl=addsl(sl,$3->sl);
+        sl=addtxt(sl,")+1{");
+        sl=addsl(sl,$6->sl);
+        sl=addtxt(sl,"}}");
+        $$=sl;
+        free($1);
+        free($3);
+        free($6);
+      }
+    | expr TO expr '=' '>' expr {
+        /* Aggregate expression: (low to high => value) */
+        /* Translates to Verilog: {width{value}} */
+        slist *sl;
+        sl=addtxt(NULL,"{(");
+        sl=addsl(sl,$3->sl);
+        sl=addtxt(sl,")-(");
+        sl=addsl(sl,$1->sl);
+        sl=addtxt(sl,")+1{");
+        sl=addsl(sl,$6->sl);
+        sl=addtxt(sl,"}}");
+        $$=sl;
+        free($1);
+        free($3);
+        free($6);
+      }
+    ;
+
+aggregate_list : aggregate_item ',' aggregate_item {
+        slist *sl;
+        sl=addsl(NULL,$1);
+        sl=addtxt(sl,",");
+        $$=addsl(sl,$3);
+      }
+    | aggregate_item ',' aggregate_list {
+        slist *sl;
+        sl=addsl(NULL,$1);
+        sl=addtxt(sl,",");
+        $$=addsl(sl,$3);
+      }
+    ;
 
 /* Conditional expressions */
 exprc : conf { $$=$1; }
