@@ -428,6 +428,21 @@ slist *s;
   return addtxt(s,r);
 }
 
+static slist *aggregate(expdata *high, expdata *low, expdata *value){
+  slist *sl;
+  sl=addtxt(NULL,"{(");
+  sl=addsl(sl,high->sl);
+  sl=addtxt(sl,")-(");
+  sl=addsl(sl,low->sl);
+  sl=addtxt(sl,")+1{");
+  sl=addsl(sl,value->sl);
+  sl=addtxt(sl,"}}");
+  free(high);
+  free(low);
+  free(value);
+  return sl;
+}
+
 expdata *addnest(struct expdata *inner)
 {
   expdata *e;
@@ -2412,40 +2427,18 @@ expr : signal {
          /* Aggregate expression: (high downto low => value) */
          /* Translates to Verilog: {width{value}} */
          expdata *e;
-         slist *sl;
          e=xmalloc(sizeof(expdata));
          e->op='t'; /* Terminal symbol */
-         sl=addtxt(NULL,"{(");
-         sl=addsl(sl,$2->sl);
-         sl=addtxt(sl,")-(");
-         sl=addsl(sl,$4->sl);
-         sl=addtxt(sl,")+1{");
-         sl=addsl(sl,$7->sl);
-         sl=addtxt(sl,"}}");
-         e->sl=sl;
-         free($2);
-         free($4);
-         free($7);
+         e->sl=aggregate($2,$4,$7);
          $$=e;
          }
      | '(' expr TO expr '=' '>' expr ')' {
          /* Aggregate expression: (low to high => value) */
          /* Translates to Verilog: {width{value}} */
          expdata *e;
-         slist *sl;
          e=xmalloc(sizeof(expdata));
          e->op='t'; /* Terminal symbol */
-         sl=addtxt(NULL,"{(");
-         sl=addsl(sl,$4->sl);
-         sl=addtxt(sl,")-(");
-         sl=addsl(sl,$2->sl);
-         sl=addtxt(sl,")+1{");
-         sl=addsl(sl,$7->sl);
-         sl=addtxt(sl,"}}");
-         e->sl=sl;
-         free($2);
-         free($4);
-         free($7);
+         e->sl=aggregate($4,$2,$7);
          $$=e;
          }
      | expr '&' expr { /* Vector chaining a.k.a. bit concatenation */
@@ -2556,34 +2549,12 @@ aggregate_item : OTHERS '=' '>' expr {
     | expr DOWNTO expr '=' '>' expr {
         /* Aggregate expression: (high downto low => value) */
         /* Translates to Verilog: {width{value}} */
-        slist *sl;
-        sl=addtxt(NULL,"{(");
-        sl=addsl(sl,$1->sl);
-        sl=addtxt(sl,")-(");
-        sl=addsl(sl,$3->sl);
-        sl=addtxt(sl,")+1{");
-        sl=addsl(sl,$6->sl);
-        sl=addtxt(sl,"}}");
-        $$=sl;
-        free($1);
-        free($3);
-        free($6);
+        $$=aggregate($1,$3,$6);
       }
     | expr TO expr '=' '>' expr {
         /* Aggregate expression: (low to high => value) */
         /* Translates to Verilog: {width{value}} */
-        slist *sl;
-        sl=addtxt(NULL,"{(");
-        sl=addsl(sl,$3->sl);
-        sl=addtxt(sl,")-(");
-        sl=addsl(sl,$1->sl);
-        sl=addtxt(sl,")+1{");
-        sl=addsl(sl,$6->sl);
-        sl=addtxt(sl,"}}");
-        $$=sl;
-        free($1);
-        free($3);
-        free($6);
+        $$=aggregate($3,$1,$6);
       }
     ;
 
