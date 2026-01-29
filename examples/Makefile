@@ -7,7 +7,7 @@ ifneq ($(shell which ghdl),)
 	@mkdir -p $(TEMP)
 	@echo "##### Checking examples with GHDL ##############################"
 	ghdl -a --workdir=$(TEMP) signextend.vhd
-	ghdl -a --workdir=$(TEMP) *.vhd
+	ghdl -a -fsynopsys --workdir=$(TEMP) *.vhd
 endif
 
 clean:

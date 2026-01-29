@@ -14,6 +14,10 @@ architecture rtl of portmap_child is
 begin
 end architecture rtl;
 
+library IEEE;
+use IEEE.std_logic_1164.all;
+use IEEE.numeric_std.all;
+
 entity portmap_typeconv is
   port(
     clk : in std_logic

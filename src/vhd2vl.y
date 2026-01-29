@@ -321,7 +321,13 @@ slist *addsl(slist *sl, slist *sl2){
 }
 
 slist *addvec(slist *sl, char *s){
-  sl=addval(sl,strlen(s));
+  size_t len = strlen(s);
+  if (len == 0) {
+    /* Avoid emitting zero-width literals like 0'b */
+    sl=addtxt(sl,"1'b0");
+    return sl;
+  }
+  sl=addval(sl,len);
   sl=addtxt(sl,"'b");
   sl=addtxt(sl,s);
   return sl;
@@ -330,6 +336,12 @@ slist *addvec(slist *sl, char *s){
 slist *addvec_base(slist *sl, char *b, char *s){
   const char *base_str="'b";
   int base_mult=1;
+  size_t len = strlen(s);
+  if (len == 0) {
+    /* Avoid emitting zero-width literals like 0'b */
+    sl=addtxt(sl,"1'b0");
+    return sl;
+  }
   if (strcasecmp(b,"B") == 0) {
      /* nothing to do */
   } else if (strcasecmp(b,"X") == 0) {
@@ -357,6 +369,15 @@ slist *addpar_snug(slist *sl, vrange *v){
     fprintf(stderr,"addpar_snug %d: ", v->sizeval);
     fslprint(stderr, v->size_expr);
     fprintf(stderr,"\n");
+  }
+  /* If width expression is known but bounds are non-constant (e.g. -1+N downto 0),
+   * emit width-based range to avoid illegal negative/empty bounds. */
+  if (v->size_expr != NULL && v->sizeval <= 0 && v->vtype == tVRANGE && (!v->nlo || !v->nhi)) {
+    sl=addtxt(sl,"[");
+    sl=addtxt(sl,"(");
+    sl=addsl(sl,v->size_expr);
+    sl=addtxt(sl,")-1:0]");
+    return sl;
   }
   if(v->nlo != NULL) {   /* indexes are simple expressions */
     sl=addtxt(sl,"[");
@@ -426,6 +447,61 @@ slist *s;
   s=addtxt(NULL,l);
   s=addsl(s,sl);
   return addtxt(s,r);
+}
+
+static slist *build_dec_lit(int width, int value){
+  slist *sl;
+  if (width <= 0) {
+    return addval(NULL, value);
+  }
+  if (value < 0) {
+    /* e.g. 8'd(-5) -> -8'sd5 */
+    unsigned int absval = (unsigned int)(-value);
+    sl=addtxt(NULL,"-");
+    sl=addval(sl,width);
+    sl=addtxt(sl,"'sd");
+    sl=addval(sl,(int)absval);
+    return sl;
+  }
+  sl=addval(NULL,width);
+  sl=addtxt(sl,"'d");
+  sl=addval(sl,value);
+  return sl;
+}
+
+static int expdata_literal_int(expdata *e, int *out){
+  slist *sl;
+  if (!e || !out) {
+    return 0;
+  }
+  if (e->op == 'n') {
+    *out = e->value;
+    return 1;
+  }
+  if (e->op == 't') {
+    sl = e->sl;
+    if (sl && sl->type == tVAL && sl->slst == NULL) {
+      *out = sl->data.val;
+      return 1;
+    }
+    return 0;
+  }
+  if (e->op != 'm') {
+    return 0;
+  }
+  sl = e->sl;
+  if (sl && sl->type == tVAL && sl->slst == NULL) {
+    *out = -sl->data.val;
+    return 1;
+  }
+  if (sl && sl->type == tSLIST && sl->slst && sl->slst->type == tTXT && sl->data.sl) {
+    if (strcmp(sl->slst->data.txt, " -") == 0 && sl->data.sl->type == tVAL && sl->data.sl->slst == NULL) {
+      *out = sl->data.sl->data.val;
+      *out = -(*out);
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static slist *aggregate(expdata *high, expdata *low, expdata *value){
@@ -556,7 +632,7 @@ int prec(int op){
   case 'o': /* others */
     return 9;
     break;
-  case 't':case 'n':
+  case 't': case 'n': case 's':
     return 8;
     break;
   case '~':
@@ -1299,6 +1375,23 @@ vec_range : simple_expr updown simple_expr {
               $$->nlo=$3->sl;
               $$->sizeval = -1; /* undefined size */
               $$->updown = 0; /* not relevant */
+              if ($1->op == 'n' && $3->op == 'n' && $1->value < $3->value && $2 == -1) {
+                /* Avoid negative width like (-1+23 downto 0): clamp to scalar */
+                $$->vtype = tSCALAR;
+                $$->nhi = NULL;
+                $$->nlo = NULL;
+                $$->sizeval = 1;
+                $$->size_expr = NULL;
+                $$->updown = 0;
+              } else if ($1->op == 'n' && $3->op == 'n' && $3->value < $1->value && $2 == 1) {
+                /* Avoid negative width for TO with low>high: clamp to scalar */
+                $$->vtype = tSCALAR;
+                $$->nhi = NULL;
+                $$->nlo = NULL;
+                $$->sizeval = 1;
+                $$->size_expr = NULL;
+                $$->updown = 0;
+              }
               /* slist_check_diff() is where we analyze the two expressions
                * to see if they have a simple (possibly constant) difference.
                * Start with an option to visualize their data structures.
@@ -1314,7 +1407,9 @@ vec_range : simple_expr updown simple_expr {
                 if (0) sldump(4, $$->nlo);
               }
               /* calculate the width of this vrange */
-              if ($1->op == 'n' && $3->op == 'n') {
+              if ($$->vtype != tVRANGE) {
+                /* already clamped to scalar, skip width analysis */
+              } else if ($1->op == 'n' && $3->op == 'n') {
                 if ($2==-1) { /* (nhi:natural downto nlo:natural) */
                   $$->sizeval = $1->value - $3->value + 1;
                 } else {      /* (nhi:natural to     nlo:natural) */
@@ -2384,16 +2479,16 @@ expr : signal {
            e->op='t'; /* Terminal symbol */
            switch($1) {
            case  2:
-             sprintf(natval, "'B%s",$2);
+             sprintf(natval, "'b%s",$2);
              break;
            case  8:
-             sprintf(natval, "'O%s",$2);
+             sprintf(natval, "'o%s",$2);
              break;
            case 10:
-             sprintf(natval, "'D%s",$2);
+             sprintf(natval, "'d%s",$2);
              break;
            case 16:
-             sprintf(natval, "'H%s",$2);
+             sprintf(natval, "'h%s",$2);
              break;
            default:
              sprintf(natval,"%d#%s#",$1,$2);
@@ -2443,12 +2538,20 @@ expr : signal {
          }
      | expr '&' expr { /* Vector chaining a.k.a. bit concatenation */
          slist *sl;
-           sl=addtxt($1->sl,",");
-           sl=addsl(sl,$3->sl);
-           free($3);
-           $1->op='c';
-           $1->sl=sl;
-           $$=$1;
+          if ($1->op == 's' && $1->value == 0) {
+            free($1);
+            $$=$3;
+          } else if ($3->op == 's' && $3->value == 0) {
+            free($3);
+            $$=$1;
+          } else {
+            sl=addtxt($1->sl,",");
+            sl=addsl(sl,$3->sl);
+            free($3);
+            $1->op='c';
+            $1->sl=sl;
+            $$=$1;
+          }
          }
      | '-' expr %prec UMINUS {$$=addexpr(NULL,'m'," -",$2);}
      | '+' expr %prec UPLUS {$$=addexpr(NULL,'p'," +",$2);}
@@ -2535,8 +2638,20 @@ expr : signal {
        $$ = addnest($3);
       }
      | CONVFUNC_2 '(' expr ',' expr ')' {
-       /* two argument type conversion e.g. to_unsigned(x, 3) */
-       $$ = addnest($3);
+       /* two argument type conversion e.g. to_signed(x, 3) */
+       int width_val;
+       int literal_val;
+       if (expdata_literal_int($5, &width_val) && expdata_literal_int($3, &literal_val) && literal_val < 0) {
+         expdata *e=xmalloc(sizeof(expdata));
+         e->op='t';
+         e->sl=build_dec_lit(width_val, literal_val);
+         free($3);
+         free($5);
+         $$=e;
+       } else {
+         $$ = addnest($3);
+         free($5);
+       }
       }
      | '(' expr ')' {
        $$ = addnest($2);
@@ -2725,8 +2840,10 @@ simple_expr : signal {
       }
      | STRING {
          expdata *e;
+         size_t len = strlen($1);
          e=xmalloc(sizeof(expdata));
-         e->op='t'; /* Terminal symbol */
+         e->op='s';
+         e->value=len;
          e->sl=addvec(NULL,$1);
          $$=e;
       }
@@ -2740,7 +2857,16 @@ simple_expr : signal {
       }
      | '-' simple_expr %prec UMINUS {
          /* Unary minus for simple_expr (needed for ranges like -1+23 downto 0) */
-         $$=addexpr(NULL,'m'," -",$2);
+        if ($2->op == 'n') {
+          expdata *e=xmalloc(sizeof(expdata));
+          e->op='n';
+          e->value = -$2->value;
+          e->sl=addval(NULL,e->value);
+          free($2);
+          $$=e;
+        } else {
+          $$=addexpr(NULL,'m'," -",$2);
+        }
       }
      | NAME '\'' LEFT {
 	      /* lookup NAME and get its left */
