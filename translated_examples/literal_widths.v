@@ -14,7 +14,7 @@ wire [7:0] s_neg;
 wire [3:0] c_bin;
 
   // negative literal should emit sized signed constant
-  assign s_neg = -8'sd5;
+  assign s_neg = -8'd5;
   // binary literal width stays explicit
   assign c_bin = 4'b1010;
   // concat mixes signed and std_logic_vector; sized literals must avoid unsized 'sd forms

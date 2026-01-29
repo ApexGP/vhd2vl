@@ -400,7 +400,14 @@ slist *addpar_snug(slist *sl, vrange *v){
 slist *addpar(slist *sl, vrange *v){
   sl=addtxt(sl," ");
   if(v->nlo != NULL) {   /* indexes are simple expressions */
-    sl=addpar_snug(sl, v);
+    if (v->updown && v->size_expr) {
+      /* Declarations cannot use +:/-: part-select; use width-based range. */
+      sl=addtxt(sl,"[(");
+      sl=addsl(sl, v->size_expr);
+      sl=addtxt(sl,")-1:0]");
+    } else {
+      sl=addpar_snug(sl, v);
+    }
     sl=addtxt(sl," ");
   }
   return sl;
@@ -449,23 +456,46 @@ slist *s;
   return addtxt(s,r);
 }
 
-static slist *build_dec_lit(int width, int value){
+static slist *build_dec_lit(int width, slist *width_expr, int value){
   slist *sl;
-  if (width <= 0) {
-    return addval(NULL, value);
-  }
-  if (value < 0) {
-    /* e.g. 8'd(-5) -> -8'sd5 */
-    unsigned int absval = (unsigned int)(-value);
-    sl=addtxt(NULL,"-");
-    sl=addval(sl,width);
-    sl=addtxt(sl,"'sd");
-    sl=addval(sl,(int)absval);
+  if (width_expr == NULL) {
+    if (width <= 0) {
+      return addval(NULL, value);
+    }
+    if (value < 0) {
+      /* e.g. 8'd(-5) -> -8'd5 */
+      unsigned int absval = (unsigned int)(-value);
+      sl=addtxt(NULL,"-");
+      sl=addval(sl,width);
+      sl=addtxt(sl,"'d");
+      sl=addval(sl,(int)absval);
+      return sl;
+    }
+    sl=addval(NULL,width);
+    sl=addtxt(sl,"'d");
+    sl=addval(sl,value);
     return sl;
   }
-  sl=addval(NULL,width);
+
+  if (value < 0) {
+    return NULL;
+  }
+  
+  unsigned int uval = (unsigned int)value;
+  unsigned int tmp = uval;
+  int minw = 1;
+  while (tmp >>= 1) {
+    minw++;
+  }
+  sl=addtxt(NULL,"{{((");
+  sl=addsl(sl,width_expr);
+  sl=addtxt(sl,")-");
+  sl=addval(sl,minw);
+  sl=addtxt(sl,"){1'b0}},");
+  sl=addval(sl,minw);
   sl=addtxt(sl,"'d");
-  sl=addval(sl,value);
+  sl=addval(sl,(int)uval);
+  sl=addtxt(sl,"}");
   return sl;
 }
 
@@ -2538,6 +2568,8 @@ expr : signal {
          }
      | expr '&' expr { /* Vector chaining a.k.a. bit concatenation */
          slist *sl;
+         int lhsw = ($1->op == 's' || $1->op == 'n') ? $1->value : -1;
+         int rhsw = ($3->op == 's' || $3->op == 'n') ? $3->value : -1;
           if ($1->op == 's' && $1->value == 0) {
             free($1);
             $$=$3;
@@ -2550,6 +2582,11 @@ expr : signal {
             free($3);
             $1->op='c';
             $1->sl=sl;
+            if (lhsw > 0 && rhsw > 0) {
+              $1->value = lhsw + rhsw;
+            } else {
+              $1->value = 0; /* unknown width */
+            }
             $$=$1;
           }
          }
@@ -2641,13 +2678,35 @@ expr : signal {
        /* two argument type conversion e.g. to_signed(x, 3) */
        int width_val;
        int literal_val;
-       if (expdata_literal_int($5, &width_val) && expdata_literal_int($3, &literal_val) && literal_val < 0) {
-         expdata *e=xmalloc(sizeof(expdata));
-         e->op='t';
-         e->sl=build_dec_lit(width_val, literal_val);
-         free($3);
+       if (!expdata_literal_int($3, &literal_val)) {
+         $$ = addnest($3);
          free($5);
-         $$=e;
+       } else if (expdata_literal_int($5, &width_val)) {
+         if (literal_val < 0) {
+           expdata *e=xmalloc(sizeof(expdata));
+           e->op='t';
+           e->sl=build_dec_lit(width_val, NULL, literal_val);
+           free($3);
+           free($5);
+           $$=e;
+         } else {
+           $$ = addnest($3);
+           free($5);
+         }
+       } else if (literal_val >= 0) {
+         expdata *e=xmalloc(sizeof(expdata));
+         slist *lit = build_dec_lit(0, $5->sl, literal_val);
+         if (lit) {
+           e->op='t';
+           e->sl=lit;
+           free($3);
+           free($5);
+           $$=e;
+         } else {
+           free(e);
+           $$ = addnest($3);
+           free($5);
+         }
        } else {
          $$ = addnest($3);
          free($5);
