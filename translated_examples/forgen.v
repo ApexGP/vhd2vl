@@ -22,8 +22,8 @@ reg [bus_width * 2:0] regSelect;
   //---------------------------------------------------
   genvar bitnum;
   generate for (bitnum=0; bitnum <= bus_width; bitnum = bitnum + 1) begin: reg_gp2
-      wbit1 wbit1_inst(
-          .clk(sysclk),
+    wbit1 wbit1_inst(
+      .clk(sysclk),
       .wrb(wrb),
       .reset(reset),
       .enb(regSelect[TOP_GP2]),

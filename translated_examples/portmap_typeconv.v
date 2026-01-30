@@ -23,7 +23,7 @@ input wire clk
 wire [7:0] s_slv;
 
   portmap_child u0(
-      .a(42),
+    .a(42),
     .b( -3),
     .c(s_slv));
 

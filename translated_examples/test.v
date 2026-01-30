@@ -146,7 +146,7 @@ reg [1:0] colour;
 
   // Components instantiation
   dsp dsp_inst(
-      // Inputs
+    // Inputs
     .clk(clk),
     .rstn(rstn),
     .en(en),
@@ -162,7 +162,7 @@ reg [1:0] colour;
     .memdout(memdout));
 
   mem dsp_mem(
-      // Inputs
+    // Inputs
     .clk(clk),
     .rstn(rstn),
     .en(en),
