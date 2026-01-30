@@ -404,7 +404,7 @@ slist *addpar(slist *sl, vrange *v){
       /* Declarations cannot use +:/-: part-select; use width-based range. */
       sl=addtxt(sl,"[(");
       sl=addsl(sl, v->size_expr);
-      sl=addtxt(sl,")-1:0]");
+      sl=addtxt(sl,"):0]");
     } else {
       sl=addpar_snug(sl, v);
     }
@@ -2570,26 +2570,26 @@ expr : signal {
          slist *sl;
          int lhsw = ($1->op == 's' || $1->op == 'n') ? $1->value : -1;
          int rhsw = ($3->op == 's' || $3->op == 'n') ? $3->value : -1;
-          if ($1->op == 's' && $1->value == 0) {
-            free($1);
-            $$=$3;
-          } else if ($3->op == 's' && $3->value == 0) {
-            free($3);
-            $$=$1;
-          } else {
-            sl=addtxt($1->sl,",");
-            sl=addsl(sl,$3->sl);
-            free($3);
-            $1->op='c';
-            $1->sl=sl;
-            if (lhsw > 0 && rhsw > 0) {
-              $1->value = lhsw + rhsw;
-            } else {
-              $1->value = 0; /* unknown width */
-            }
-            $$=$1;
-          }
+         if ($1->op == 's' && $1->value == 0) {
+           free($1);
+           $$=$3;
+         } else if ($3->op == 's' && $3->value == 0) {
+           free($3);
+           $$=$1;
+         } else {
+           sl=addtxt($1->sl,",");
+           sl=addsl(sl,$3->sl);
+           free($3);
+           $1->op='c';
+           $1->sl=sl;
+           if (lhsw > 0 && rhsw > 0) {
+             $1->value = lhsw + rhsw;
+           } else {
+             $1->value = 0; /* unknown width */
+           }
+           $$=$1;
          }
+       }
      | '-' expr %prec UMINUS {$$=addexpr(NULL,'m'," -",$2);}
      | '+' expr %prec UPLUS {$$=addexpr(NULL,'p'," +",$2);}
      | expr '+' expr {$$=addexpr($1,'+'," + ",$3);}
@@ -2676,9 +2676,10 @@ expr : signal {
       }
      | CONVFUNC_2 '(' expr ',' expr ')' {
        /* two argument type conversion e.g. to_signed(x, 3) */
-       int width_val;
-       int literal_val;
-       if (!expdata_literal_int($3, &literal_val)) {
+       int width_val = 0;
+       int literal_val = 0;
+ 
+       if (!(expdata_literal_int($3, &literal_val))) {
          $$ = addnest($3);
          free($5);
        } else if (expdata_literal_int($5, &width_val)) {
@@ -2689,9 +2690,20 @@ expr : signal {
            free($3);
            free($5);
            $$=e;
-         } else {
+         } else if (width_val <= 0 || literal_val != 0) {
            $$ = addnest($3);
            free($5);
+         } else {
+           expdata *e=xmalloc(sizeof(expdata));
+           slist *lit;
+           lit=addval(NULL,width_val);
+           lit=addtxt(lit,"'b0");
+           e->op='s';
+           e->value=width_val;
+           e->sl=lit;
+           free($3);
+           free($5);
+           $$=e;
          }
        } else if (literal_val >= 0) {
          expdata *e=xmalloc(sizeof(expdata));
