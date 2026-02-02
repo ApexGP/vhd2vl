@@ -28,6 +28,10 @@ begin
   end process;
 end architecture rtl;
 
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
 -- Second entity: Simple adder
 entity simple_adder is
   port (

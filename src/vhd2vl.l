@@ -140,7 +140,9 @@ int scan_int(char *s);
 "real"                            { return REAL; }
 "resize" |
 "to_signed" |
-"to_unsigned"                     { return CONVFUNC_2; }
+"to_unsigned" |
+"conv_std_logic_vector" |
+"conv_std_ulogic_vector"          { return CONVFUNC_2; }
 "to_integer" |
 "conv_integer"                    { return CONVFUNC_1; }
 
