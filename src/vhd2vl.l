@@ -218,7 +218,7 @@ void getstring(unsigned skip){
   yytext[i]=0;
   yylval.txt=malloc(i+1);
   strcpy(yylval.txt, yytext+skip);
-  replace_dash(yylval.txt); 
+  replace_dash(yylval.txt);
 }
 
 void getbasedstring(unsigned skip){
@@ -228,7 +228,7 @@ void getbasedstring(unsigned skip){
   yytext[i]=0;
   yylval.txt=malloc(i+1);
   strcpy(yylval.txt, yytext+skip);
-  replace_dash(yylval.txt); 
+  replace_dash(yylval.txt);
 }
 
 int scan_int(char *s){
