@@ -12,6 +12,8 @@ output wire [11:0] y
 parameter c_hex = 8'hAB;  // expect 8'hAB
 wire [7:0] s_neg;
 wire [3:0] c_bin;
+wire s_null_downto;  // null ranges to exercise negative-width clamp in range handling
+wire s_null_to;
 
   // negative literal should emit sized signed constant
   assign s_neg = -8'd5;

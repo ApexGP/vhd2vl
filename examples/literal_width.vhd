@@ -14,6 +14,9 @@ architecture rtl of literal_widths is
   constant c_hex : std_logic_vector(7 downto 0) := x"AB"; -- expect 8'hAB
   signal s_neg   : signed(7 downto 0);
   signal c_bin   : std_logic_vector(3 downto 0);
+  
+  signal s_null_downto : std_logic_vector(0 downto 1); -- null ranges to exercise negative-width clamp in range handling
+  signal s_null_to     : std_logic_vector(1 to 0);
 begin
   -- negative literal should emit sized signed constant
   s_neg <= to_signed(-5, 8);
