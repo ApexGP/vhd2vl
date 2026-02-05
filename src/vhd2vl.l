@@ -37,6 +37,7 @@ extern int skipRem;
 void getstring(unsigned skip);
 void getbasedstring(unsigned skip);
 int scan_int(char *s);
+static void replace_dash(char *s);
 
 %}
 %%
@@ -166,8 +167,9 @@ int scan_int(char *s);
 "**"                              { return POW; }
 
 \"[ \!#-~]*\" |
-\'[01xz]\' {
+\'[01xz-]\' {
   getstring(1);
+  replace_dash(yylval.txt); /* normalize VHDL don't-care '-' to Verilog 'x' */
   return STRING;
 }
 
@@ -201,6 +203,14 @@ int scan_int(char *s);
 
 %%
 
+static void replace_dash(char *s) {
+  /* replace '-' with 'x' */
+  if (!s) return;
+  for (unsigned j = 0; s[j] != 0; j++) {
+    if (s[j] == '-') s[j] = 'x';
+  }
+}
+
 void getstring(unsigned skip){
 /* Gets a string excluding " or ' */
   unsigned i;
@@ -208,6 +218,7 @@ void getstring(unsigned skip){
   yytext[i]=0;
   yylval.txt=malloc(i+1);
   strcpy(yylval.txt, yytext+skip);
+  replace_dash(yylval.txt);
 }
 
 void getbasedstring(unsigned skip){
@@ -217,6 +228,7 @@ void getbasedstring(unsigned skip){
   yytext[i]=0;
   yylval.txt=malloc(i+1);
   strcpy(yylval.txt, yytext+skip);
+  replace_dash(yylval.txt);
 }
 
 int scan_int(char *s){
