@@ -88,6 +88,7 @@ int np=1;
 char wire[]="wire";
 char reg[]="reg";
 int dowith=0;
+int convfunc2_is_port=0;
 slist *slwith;
 
 /* Indentation variables */
@@ -321,7 +322,12 @@ slist *addsl(slist *sl, slist *sl2){
 }
 
 slist *addvec(slist *sl, char *s){
-  sl=addval(sl,strlen(s));
+  size_t len = strlen(s);
+  if (len == 0) {
+    /* Avoid emitting zero-width literals like 0'b */
+    return sl;
+  }
+  sl=addval(sl,len);
   sl=addtxt(sl,"'b");
   sl=addtxt(sl,s);
   return sl;
@@ -330,6 +336,11 @@ slist *addvec(slist *sl, char *s){
 slist *addvec_base(slist *sl, char *b, char *s){
   const char *base_str="'b";
   int base_mult=1;
+  size_t len = strlen(s);
+  if (len == 0) {
+    /* Avoid emitting zero-width literals like 0'b */
+    return sl;
+  }
   if (strcasecmp(b,"B") == 0) {
      /* nothing to do */
   } else if (strcasecmp(b,"X") == 0) {
@@ -358,6 +369,15 @@ slist *addpar_snug(slist *sl, vrange *v){
     fslprint(stderr, v->size_expr);
     fprintf(stderr,"\n");
   }
+  /* If width expression is known but bounds are non-constant (e.g. -1+N downto 0),
+   * emit width-based range to avoid illegal negative/empty bounds. */
+  if (v->size_expr != NULL && v->sizeval <= 0 && v->vtype == tVRANGE && (!v->nlo || !v->nhi)) {
+    sl=addtxt(sl,"[");
+    sl=addtxt(sl,"(");
+    sl=addsl(sl,v->size_expr);
+    sl=addtxt(sl,")-1:0]");
+    return sl;
+  }
   if(v->nlo != NULL) {   /* indexes are simple expressions */
     sl=addtxt(sl,"[");
     if(v->nhi != NULL){
@@ -379,7 +399,14 @@ slist *addpar_snug(slist *sl, vrange *v){
 slist *addpar(slist *sl, vrange *v){
   sl=addtxt(sl," ");
   if(v->nlo != NULL) {   /* indexes are simple expressions */
-    sl=addpar_snug(sl, v);
+    if (v->updown && v->size_expr) {
+      /* Declarations cannot use +:/-: part-select; use width-based range. */
+      sl=addtxt(sl,"[(");
+      sl=addsl(sl, v->size_expr);
+      sl=addtxt(sl,"):0]");
+    } else {
+      sl=addpar_snug(sl, v);
+    }
     sl=addtxt(sl," ");
   }
   return sl;
@@ -426,6 +453,99 @@ slist *s;
   s=addtxt(NULL,l);
   s=addsl(s,sl);
   return addtxt(s,r);
+}
+
+static slist *build_dec_lit(int width, slist *width_expr, int value){
+  slist *sl;
+  if (width_expr == NULL) {
+    if (width <= 0) {
+      return addval(NULL, value);
+    }
+    if (value < 0) {
+      /* e.g. 8'd(-5) -> -8'd5 */
+      unsigned int absval = (unsigned int)(-value);
+      sl=addtxt(NULL,"-");
+      sl=addval(sl,width);
+      sl=addtxt(sl,"'d");
+      sl=addval(sl,(int)absval);
+      return sl;
+    }
+    sl=addval(NULL,width);
+    sl=addtxt(sl,"'d");
+    sl=addval(sl,value);
+    return sl;
+  }
+
+  if (value < 0) {
+    return NULL;
+  }
+
+  unsigned int uval = (unsigned int)value;
+  unsigned int tmp = uval;
+  int minw = 1;
+  while (tmp >>= 1) {
+    minw++;
+  }
+  sl=addtxt(NULL,"{{((");
+  sl=addsl(sl,width_expr);
+  sl=addtxt(sl,")-");
+  sl=addval(sl,minw);
+  sl=addtxt(sl,"){1'b0}},");
+  sl=addval(sl,minw);
+  sl=addtxt(sl,"'d");
+  sl=addval(sl,(int)uval);
+  sl=addtxt(sl,"}");
+  return sl;
+}
+
+static int expdata_literal_int(expdata *e, int *out){
+  slist *sl;
+  if (!e || !out) {
+    return 0;
+  }
+  if (e->op == 'n') {
+    *out = e->value;
+    return 1;
+  }
+  if (e->op == 't') {
+    sl = e->sl;
+    if (sl && sl->type == tVAL && sl->slst == NULL) {
+      *out = sl->data.val;
+      return 1;
+    }
+    return 0;
+  }
+  if (e->op != 'm') {
+    return 0;
+  }
+  sl = e->sl;
+  if (sl && sl->type == tVAL && sl->slst == NULL) {
+    *out = -sl->data.val;
+    return 1;
+  }
+  if (sl && sl->type == tSLIST && sl->slst && sl->slst->type == tTXT && sl->data.sl) {
+    if (strcmp(sl->slst->data.txt, " -") == 0 && sl->data.sl->type == tVAL && sl->data.sl->slst == NULL) {
+      *out = sl->data.sl->data.val;
+      *out = -(*out);
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static slist *aggregate(expdata *high, expdata *low, expdata *value){
+  slist *sl;
+  sl=addtxt(NULL,"{(");
+  sl=addsl(sl,high->sl);
+  sl=addtxt(sl,")-(");
+  sl=addsl(sl,low->sl);
+  sl=addtxt(sl,")+1{");
+  sl=addsl(sl,value->sl);
+  sl=addtxt(sl,"}}");
+  free(high);
+  free(low);
+  free(value);
+  return sl;
 }
 
 expdata *addnest(struct expdata *inner)
@@ -541,7 +661,7 @@ int prec(int op){
   case 'o': /* others */
     return 9;
     break;
-  case 't':case 'n':
+  case 't': case 'n': case 's':
     return 8;
     break;
   case '~':
@@ -907,6 +1027,7 @@ slist *emit_io_list(slist *sl)
 %type <sl> portlist genlist architecture
 %type <sl> a_decl a_body p_decl oname
 %type <sl> map_list map_item mvalue sigvalue
+%type <sl> aggregate_item aggregate_list
 %type <sl> generic_map_list generic_map_item
 %type <sl> conf exprc sign_list p_body optname gen_optname
 %type <sl> edge
@@ -1283,6 +1404,23 @@ vec_range : simple_expr updown simple_expr {
               $$->nlo=$3->sl;
               $$->sizeval = -1; /* undefined size */
               $$->updown = 0; /* not relevant */
+              if ($1->op == 'n' && $3->op == 'n' && $1->value < $3->value && $2 == -1) {
+                /* Avoid negative width like (-1+23 downto 0): clamp to scalar */
+                $$->vtype = tSCALAR;
+                $$->nhi = NULL;
+                $$->nlo = NULL;
+                $$->sizeval = 1;
+                $$->size_expr = NULL;
+                $$->updown = 0;
+              } else if ($1->op == 'n' && $3->op == 'n' && $3->value < $1->value && $2 == 1) {
+                /* Avoid negative width for TO with low>high: clamp to scalar */
+                $$->vtype = tSCALAR;
+                $$->nhi = NULL;
+                $$->nlo = NULL;
+                $$->sizeval = 1;
+                $$->size_expr = NULL;
+                $$->updown = 0;
+              }
               /* slist_check_diff() is where we analyze the two expressions
                * to see if they have a simple (possibly constant) difference.
                * Start with an option to visualize their data structures.
@@ -1298,7 +1436,9 @@ vec_range : simple_expr updown simple_expr {
                 if (0) sldump(4, $$->nlo);
               }
               /* calculate the width of this vrange */
-              if ($1->op == 'n' && $3->op == 'n') {
+              if ($$->vtype != tVRANGE) {
+                /* already clamped to scalar, skip width analysis */
+              } else if ($1->op == 'n' && $3->op == 'n') {
                 if ($2==-1) { /* (nhi:natural downto nlo:natural) */
                   $$->sizeval = $1->value - $3->value + 1;
                 } else {      /* (nhi:natural to     nlo:natural) */
@@ -1600,7 +1740,7 @@ a_body : rem {$$=addind($1);}
            sl=addtxt(sl," ");
            sl=addtxt(sl,$2); /* NAME1 */
            sl=addtxt(sl,"(\n");
-           sl=addsl(sl,indents[indent]);
+           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$10);  /* map_list */
            sl=addtxt(sl,");\n\n");
            $$=addsl(sl,$15); /* a_body */
@@ -1615,13 +1755,13 @@ a_body : rem {$$=addind($1);}
              sl=addsl(sl,indents[indent]);
            }
            sl=addtxt(sl," #(\n");
-           sl=addsl(sl,indents[indent]);
+           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$10); /* (generic) map_list */
            sl=addtxt(sl,")\n");
            sl=addsl(sl,indents[indent]);
            sl=addtxt(sl,$2); /* NAME1 (instance name) */
            sl=addtxt(sl,"(\n");
-           sl=addsl(sl,indents[indent]);
+           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$18); /* map_list */
            sl=addtxt(sl,");\n\n");
            $$=addsl(sl,$22); /* a_body */
@@ -1722,7 +1862,7 @@ a_body : rem {$$=addind($1);}
            free(tname_list);
            }
            sl=addtxt(sl,"\n");
-           sl=addsl(sl,indents[indent]);
+           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$6);   /* a_body:1 */
            sl=addsl(sl,indents[indent]);
            sl=addtxt(sl,"end\n");
@@ -1761,7 +1901,7 @@ a_body : rem {$$=addind($1);}
            free(tname_list);
            }
            sl=addtxt(sl,"\n");
-           sl=addsl(sl,indents[indent]);
+           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$10);   /* a_body:1 */
            sl=addsl(sl,indents[indent]);
            sl=addtxt(sl,"end\n");
@@ -2224,9 +2364,10 @@ mvalue : STRING {$$=addvec(NULL,$1);}
              $$=addtxt($$,"}}");
              fprintf(stderr,"WARNING (line %d): broken width on port with OTHERS.\n",lineno);
            }
-       | BITVECT '(' expr ')' {
+       | BITVECT '(' {convfunc2_is_port++;} expr ')' {
              /* Type conversion function in port map */
-             $$=addsl(NULL,$3->sl);
+             convfunc2_is_port--;
+             $$=addsl(NULL,$4->sl);
            }
        | CONVFUNC_1 '(' expr ')' {
              /* Type conversion function in port map */
@@ -2234,7 +2375,34 @@ mvalue : STRING {$$=addvec(NULL,$1);}
            }
        | CONVFUNC_2 '(' expr ',' expr ')' {
              /* Two-argument type conversion in port map */
-             $$=addsl(NULL,$3->sl);
+             int width_val = 0;
+             int literal_val = 0;
+             slist *lit;
+             if (!(expdata_literal_int($3, &literal_val))) {
+               $$=addsl(NULL,$3->sl);
+             } else if (expdata_literal_int($5, &width_val)) {
+               if (width_val > 0) {
+                 if (literal_val == 0) {
+                   lit=addval(NULL,width_val);
+                   lit=addtxt(lit,"'b0");
+                   $$=lit;
+                 } else {
+                   lit=build_dec_lit(width_val, NULL, literal_val);
+                   $$=lit ? lit : addsl(NULL,$3->sl);
+                 }
+               } else if (width_val == 0 && literal_val == 0) {
+                 free($3);
+                 free($5);
+                 $$=NULL; /* zero-width: drop from concat */
+               } else {
+                 $$=addsl(NULL,$3->sl);
+               }
+             } else if (literal_val >= 0) {
+               lit=build_dec_lit(0, $5->sl, literal_val);
+               $$=lit ? lit : addsl(NULL,$3->sl);
+             } else {
+               $$=addsl(NULL,$3->sl);
+             }
            }
        ;
 
@@ -2393,6 +2561,13 @@ expr : signal {
            e->sl=addvec_base(NULL,$1,$2);
            $$=e;
          }
+     | '(' aggregate_list ')' {
+        expdata *e;
+          e=xmalloc(sizeof(expdata));
+          e->op='t'; /* Terminal symbol */
+          e->sl=addwrap("{",$2,"}");
+          $$=e;
+        }
      | '(' OTHERS '=' '>' expr ')' {
          expdata *e;
            e=xmalloc(sizeof(expdata));
@@ -2404,51 +2579,45 @@ expr : signal {
          /* Aggregate expression: (high downto low => value) */
          /* Translates to Verilog: {width{value}} */
          expdata *e;
-         slist *sl;
          e=xmalloc(sizeof(expdata));
          e->op='t'; /* Terminal symbol */
-         sl=addtxt(NULL,"{(");
-         sl=addsl(sl,$2->sl);
-         sl=addtxt(sl,")-(");
-         sl=addsl(sl,$4->sl);
-         sl=addtxt(sl,")+1{");
-         sl=addsl(sl,$7->sl);
-         sl=addtxt(sl,"}}");
-         e->sl=sl;
-         free($2);
-         free($4);
-         free($7);
+         e->sl=aggregate($2,$4,$7);
          $$=e;
          }
      | '(' expr TO expr '=' '>' expr ')' {
          /* Aggregate expression: (low to high => value) */
          /* Translates to Verilog: {width{value}} */
          expdata *e;
-         slist *sl;
          e=xmalloc(sizeof(expdata));
          e->op='t'; /* Terminal symbol */
-         sl=addtxt(NULL,"{(");
-         sl=addsl(sl,$4->sl);
-         sl=addtxt(sl,")-(");
-         sl=addsl(sl,$2->sl);
-         sl=addtxt(sl,")+1{");
-         sl=addsl(sl,$7->sl);
-         sl=addtxt(sl,"}}");
-         e->sl=sl;
-         free($2);
-         free($4);
-         free($7);
+         e->sl=aggregate($4,$2,$7);
          $$=e;
          }
      | expr '&' expr { /* Vector chaining a.k.a. bit concatenation */
          slist *sl;
+         int lhsw = ($1->op == 's' || $1->op == 'n') ? $1->value : -1;
+         int rhsw = ($3->op == 's' || $3->op == 'n') ? $3->value : -1;
+         /* Drop zero-width literal side to avoid "{,x}" concat syntax. */
+         if ($1->sl == NULL || ($1->op == 's' && $1->value == 0)) {
+           free($1);
+           $$=$3;
+         } else if ($3->sl == NULL || ($3->op == 's' && $3->value == 0)) {
+           free($3);
+           $$=$1;
+         } else {
            sl=addtxt($1->sl,",");
            sl=addsl(sl,$3->sl);
            free($3);
            $1->op='c';
            $1->sl=sl;
+           if (lhsw > 0 && rhsw > 0) {
+             $1->value = lhsw + rhsw;
+           } else {
+             $1->value = 0; /* unknown width */
+           }
            $$=$1;
          }
+       }
      | '-' expr %prec UMINUS {$$=addexpr(NULL,'m'," -",$2);}
      | '+' expr %prec UPLUS {$$=addexpr(NULL,'p'," +",$2);}
      | expr '+' expr {$$=addexpr($1,'+'," + ",$3);}
@@ -2534,13 +2703,110 @@ expr : signal {
        $$ = addnest($3);
       }
      | CONVFUNC_2 '(' expr ',' expr ')' {
-       /* two argument type conversion e.g. to_unsigned(x, 3) */
-       $$ = addnest($3);
+       /* two argument type conversion e.g. to_signed(x, 3) */
+       int width_val = 0;
+       int literal_val = 0;
+
+       if (!(expdata_literal_int($3, &literal_val))) {
+         $$ = addnest($3);
+         free($5);
+       } else if (expdata_literal_int($5, &width_val)) {
+         if (literal_val < 0) {
+           if (width_val > 0) {
+             expdata *e=xmalloc(sizeof(expdata));
+             e->op='t';
+             e->sl=build_dec_lit(width_val, NULL, literal_val);
+             free($3);
+             free($5);
+             $$=e;
+           } else {
+             $$ = addnest($3);
+             free($5);
+           }
+         } else if (width_val == 0 && literal_val == 0) {
+           expdata *e=xmalloc(sizeof(expdata));
+           e->op='s';
+           e->value=0;  /* width zero: let concat prune */
+           e->sl=NULL;
+           free($3);
+           free($5);
+           $$=e;
+         } else if (width_val > 0) {
+           if (literal_val == 0 || convfunc2_is_port) {
+             expdata *e=xmalloc(sizeof(expdata));
+             slist *lit;
+             if (literal_val == 0) {
+               lit=addval(NULL,width_val);
+               lit=addtxt(lit,"'b0");
+             } else {
+               lit=build_dec_lit(width_val, NULL, literal_val);
+             }
+             e->op='s';
+             e->value=width_val;
+             e->sl=lit;
+             free($3);
+             free($5);
+             $$=e;
+           } else {
+             $$ = addnest($3);
+             free($5);
+           }
+         } else {
+           $$ = addnest($3);
+           free($5);
+         }
+       } else if (literal_val >= 0) {
+         expdata *e=xmalloc(sizeof(expdata));
+         slist *lit = build_dec_lit(0, $5->sl, literal_val);
+         if (lit) {
+           e->op='t';
+           e->sl=lit;
+           free($3);
+           free($5);
+           $$=e;
+         } else {
+           free(e);
+           $$ = addnest($3);
+           free($5);
+         }
+       } else {
+         $$ = addnest($3);
+         free($5);
+       }
       }
      | '(' expr ')' {
        $$ = addnest($2);
       }
      ;
+
+aggregate_item : OTHERS '=' '>' expr {
+        $$=addothers(NULL,$4->sl);
+      }
+    | expr DOWNTO expr '=' '>' expr {
+        /* Aggregate expression: (high downto low => value) */
+        /* Translates to Verilog: {width{value}} */
+        $$=aggregate($1,$3,$6);
+      }
+    | expr TO expr '=' '>' expr {
+        /* Aggregate expression: (low to high => value) */
+        /* Translates to Verilog: {width{value}} */
+        $$=aggregate($3,$1,$6);
+      }
+    ;
+
+aggregate_list : aggregate_item ',' aggregate_item {
+        slist *sl;
+        sl=addsl(NULL,$1);
+        sl=addtxt(sl,",");
+        $$=addsl(sl,$3);
+      }
+    | aggregate_item ',' aggregate_list {
+        slist *sl;
+        sl=addsl(NULL,$1);
+        sl=addtxt(sl,",");
+        $$=addsl(sl,$3);
+      }
+    ;
 
 /* Conditional expressions */
 exprc : conf { $$=$1; }
@@ -2695,9 +2961,17 @@ simple_expr : signal {
       }
      | STRING {
          expdata *e;
+         size_t len = strlen($1);
          e=xmalloc(sizeof(expdata));
-         e->op='t'; /* Terminal symbol */
-         e->sl=addvec(NULL,$1);
+         if (len == 0) {
+           e->op='s';
+           e->value=0;
+           e->sl=NULL; /* zero-width literal: drop in concatenation */
+         } else {
+           e->op='s';
+           e->value=len;
+           e->sl=addvec(NULL,$1);
+         }
          $$=e;
       }
      | NATURAL {
@@ -2710,7 +2984,16 @@ simple_expr : signal {
       }
      | '-' simple_expr %prec UMINUS {
          /* Unary minus for simple_expr (needed for ranges like -1+23 downto 0) */
-         $$=addexpr(NULL,'m'," -",$2);
+        if ($2->op == 'n') {
+          expdata *e=xmalloc(sizeof(expdata));
+          e->op='n';
+          e->value = -$2->value;
+          e->sl=addval(NULL,e->value);
+          free($2);
+          $$=e;
+        } else {
+          $$=addexpr(NULL,'m'," -",$2);
+        }
       }
      | NAME '\'' LEFT {
 	      /* lookup NAME and get its left */
