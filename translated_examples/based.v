@@ -11,10 +11,10 @@ wire [31:0] foo; wire [31:0] foo1; wire [31:0] foo2; wire [31:0] foo8; wire [31:
 
   assign foo = 123;
   assign foo1 = 123456;
-  assign foo2 = 'B00101101110111;
-  assign foo8 = 'O0177362;
-  assign foo10 = 'D01234;
+  assign foo2 = 'b00101101110111;
+  assign foo8 = 'o0177362;
+  assign foo10 = 'd01234;
   //foo11<= 11#01234#;
-  assign foo16 = 'H12af;
+  assign foo16 = 'h12af;
 
 endmodule
