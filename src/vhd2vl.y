@@ -1027,7 +1027,7 @@ slist *emit_io_list(slist *sl)
 %type <sl> portlist genlist architecture
 %type <sl> a_decl a_body p_decl oname
 %type <sl> map_list map_item mvalue sigvalue
-%type <sl> aggregate_item aggregate_list
+%type <sl> aggregate_item
 %type <sl> generic_map_list generic_map_item
 %type <sl> conf exprc sign_list p_body optname gen_optname
 %type <sl> edge
@@ -1040,6 +1040,7 @@ slist *emit_io_list(slist *sl)
 %type <n> updown
 %type <e> expr
 %type <e> simple_expr
+%type <e> aggregate_list
 %type <ss> signal
 %type <txt> opt_is opt_generic opt_entity opt_architecture opt_begin
 %type <txt> generate endgenerate
@@ -2557,37 +2558,8 @@ expr : signal {
            $$=e;
          }
      | '(' aggregate_list ')' {
-        expdata *e;
-          e=xmalloc(sizeof(expdata));
-          e->op='t'; /* Terminal symbol */
-          e->sl=addwrap("{",$2,"}");
-          $$=e;
+          $$=$2;
         }
-     | '(' OTHERS '=' '>' expr ')' {
-         expdata *e;
-           e=xmalloc(sizeof(expdata));
-           e->op='o'; /* others */
-           e->sl=addothers(NULL,$5->sl);
-           $$=e;
-         }
-     | '(' expr DOWNTO expr '=' '>' expr ')' {
-         /* Aggregate expression: (high downto low => value) */
-         /* Translates to Verilog: {width{value}} */
-         expdata *e;
-         e=xmalloc(sizeof(expdata));
-         e->op='t'; /* Terminal symbol */
-         e->sl=aggregate($2,$4,$7);
-         $$=e;
-         }
-     | '(' expr TO expr '=' '>' expr ')' {
-         /* Aggregate expression: (low to high => value) */
-         /* Translates to Verilog: {width{value}} */
-         expdata *e;
-         e=xmalloc(sizeof(expdata));
-         e->op='t'; /* Terminal symbol */
-         e->sl=aggregate($4,$2,$7);
-         $$=e;
-         }
      | expr '&' expr { /* Vector chaining a.k.a. bit concatenation */
          slist *sl;
          int lhsw = ($1->op == 's' || $1->op == 'n') ? $1->value : -1;
@@ -2789,17 +2761,21 @@ aggregate_item : OTHERS '=' '>' expr {
       }
     ;
 
-aggregate_list : aggregate_item ',' aggregate_item {
-        slist *sl;
-        sl=addsl(NULL,$1);
-        sl=addtxt(sl,",");
-        $$=addsl(sl,$3);
+aggregate_list : aggregate_item {
+      expdata *e;
+        e=xmalloc(sizeof(expdata));
+        e->op='t';  /* Terminal symbol */
+        e->sl=$1;
+        $$=e;
       }
     | aggregate_item ',' aggregate_list {
         slist *sl;
         sl=addsl(NULL,$1);
         sl=addtxt(sl,",");
-        $$=addsl(sl,$3);
+        sl=addsl(sl,$3->sl);
+        $3->sl=sl;
+        $3->op='c';  /* Chain */
+        $$=$3;
       }
     ;
 
