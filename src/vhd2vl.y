@@ -2531,16 +2531,16 @@ expr : signal {
            e->op='t'; /* Terminal symbol */
            switch($1) {
            case  2:
-             sprintf(natval, "'B%s",$2);
+             sprintf(natval, "'b%s",$2);
              break;
            case  8:
-             sprintf(natval, "'O%s",$2);
+             sprintf(natval, "'o%s",$2);
              break;
            case 10:
-             sprintf(natval, "'D%s",$2);
+             sprintf(natval, "'d%s",$2);
              break;
            case 16:
-             sprintf(natval, "'H%s",$2);
+             sprintf(natval, "'h%s",$2);
              break;
            default:
              sprintf(natval,"%d#%s#",$1,$2);
