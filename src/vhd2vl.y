@@ -1740,7 +1740,6 @@ a_body : rem {$$=addind($1);}
            sl=addtxt(sl," ");
            sl=addtxt(sl,$2); /* NAME1 */
            sl=addtxt(sl,"(\n");
-           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$10);  /* map_list */
            sl=addtxt(sl,");\n\n");
            $$=addsl(sl,$15); /* a_body */
@@ -1755,13 +1754,11 @@ a_body : rem {$$=addind($1);}
              sl=addsl(sl,indents[indent]);
            }
            sl=addtxt(sl," #(\n");
-           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$10); /* (generic) map_list */
            sl=addtxt(sl,")\n");
            sl=addsl(sl,indents[indent]);
            sl=addtxt(sl,$2); /* NAME1 (instance name) */
            sl=addtxt(sl,"(\n");
-           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$18); /* map_list */
            sl=addtxt(sl,");\n\n");
            $$=addsl(sl,$22); /* a_body */
@@ -1862,7 +1859,6 @@ a_body : rem {$$=addind($1);}
            free(tname_list);
            }
            sl=addtxt(sl,"\n");
-           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$6);   /* a_body:1 */
            sl=addsl(sl,indents[indent]);
            sl=addtxt(sl,"end\n");
@@ -1901,7 +1897,6 @@ a_body : rem {$$=addind($1);}
            free(tname_list);
            }
            sl=addtxt(sl,"\n");
-           sl=addsl(sl,indents[indent]);  /* remove this */
            sl=addsl(sl,$10);   /* a_body:1 */
            sl=addsl(sl,indents[indent]);
            sl=addtxt(sl,"end\n");
@@ -2536,16 +2531,16 @@ expr : signal {
            e->op='t'; /* Terminal symbol */
            switch($1) {
            case  2:
-             sprintf(natval, "'B%s",$2);
+             sprintf(natval, "'b%s",$2);
              break;
            case  8:
-             sprintf(natval, "'O%s",$2);
+             sprintf(natval, "'o%s",$2);
              break;
            case 10:
-             sprintf(natval, "'D%s",$2);
+             sprintf(natval, "'d%s",$2);
              break;
            case 16:
-             sprintf(natval, "'H%s",$2);
+             sprintf(natval, "'h%s",$2);
              break;
            default:
              sprintf(natval,"%d#%s#",$1,$2);

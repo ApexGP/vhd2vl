@@ -42,7 +42,7 @@ wire [13:0] memdout;
 wire [1:0] colour;
 
   dsp dsp_inst0(
-      // Inputs
+    // Inputs
     .clk(clk),
     .rstn(rstn),
     .en(1'b1),
@@ -57,10 +57,10 @@ wire [1:0] colour;
     .memdout(memdout));
 
   dsp #(
-      .rst_val(1'b1),
+    .rst_val(1'b1),
     .bus_width(16))
   dsp_inst1(
-      // Inputs
+    // Inputs
     .clk(clk),
     .rstn(rstn),
     .en(1'b1),
@@ -75,7 +75,7 @@ wire [1:0] colour;
     .memdout(memdout));
 
   signextend signextend_inst2(
-      .i(16'b0000000000000000),
+    .i(16'b0000000000000000),
     .o(/* open */));
 
 
