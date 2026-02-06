@@ -455,6 +455,16 @@ slist *s;
   return addtxt(s,r);
 }
 
+static slist *expr_to_sl(expdata *e){
+  if (!e) {
+    return NULL;
+  }
+  if (e->op == 'c') {
+    return addwrap("{", e->sl, "}");
+  }
+  return e->sl;
+}
+
 static slist *build_dec_lit(int width, slist *width_expr, int value){
   slist *sl;
   if (width_expr == NULL) {
@@ -1713,7 +1723,7 @@ a_body : rem {$$=addind($1);}
            sl=addtxt(sl,"always @(*) begin\n");
            sl=addsl(sl,indents[indent]);
            sl=addtxt(sl,"  case(");
-           sl=addsl(sl,$3->sl);
+           sl=addsl(sl,expr_to_sl($3));
            free($3);
            sl=addtxt(sl,")\n");
            if($5)
@@ -2362,11 +2372,11 @@ mvalue : STRING {$$=addvec(NULL,$1);}
        | BITVECT '(' {convfunc2_is_port++;} expr ')' {
              /* Type conversion function in port map */
              convfunc2_is_port--;
-             $$=addsl(NULL,$4->sl);
+             $$=addsl(NULL,expr_to_sl($4));
            }
        | CONVFUNC_1 '(' expr ')' {
              /* Type conversion function in port map */
-             $$=addsl(NULL,$3->sl);
+             $$=addsl(NULL,expr_to_sl($3));
            }
        | CONVFUNC_2 '(' expr ',' expr ')' {
              /* Two-argument type conversion in port map */
@@ -2374,7 +2384,7 @@ mvalue : STRING {$$=addvec(NULL,$1);}
              int literal_val = 0;
              slist *lit;
              if (!(expdata_literal_int($3, &literal_val))) {
-               $$=addsl(NULL,$3->sl);
+               $$=addsl(NULL,expr_to_sl($3));
              } else if (expdata_literal_int($5, &width_val)) {
                if (width_val > 0) {
                  if (literal_val == 0) {
@@ -2383,20 +2393,20 @@ mvalue : STRING {$$=addvec(NULL,$1);}
                    $$=lit;
                  } else {
                    lit=build_dec_lit(width_val, NULL, literal_val);
-                   $$=lit ? lit : addsl(NULL,$3->sl);
+                   $$=lit ? lit : addsl(NULL,expr_to_sl($3));
                  }
                } else if (width_val == 0 && literal_val == 0) {
                  free($3);
                  free($5);
                  $$=NULL; /* zero-width: drop from concat */
                } else {
-                 $$=addsl(NULL,$3->sl);
+                 $$=addsl(NULL,expr_to_sl($3));
                }
              } else if (literal_val >= 0) {
                lit=build_dec_lit(0, $5->sl, literal_val);
-               $$=lit ? lit : addsl(NULL,$3->sl);
+               $$=lit ? lit : addsl(NULL,expr_to_sl($3));
              } else {
-               $$=addsl(NULL,$3->sl);
+               $$=addsl(NULL,expr_to_sl($3));
              }
            }
        ;
@@ -2414,7 +2424,7 @@ generic_map_list : rem generic_map_item {
              $$=addsl(sl,$4);
            }
          | rem expr {  /* only allow a single un-named map item */
-             $$=addsl(NULL,$2->sl);
+             $$=addsl(NULL,expr_to_sl($2));
            }
          ;
 
@@ -2423,7 +2433,7 @@ generic_map_item : NAME '=' '>' expr {
              sl=addtxt(NULL,".");
              sl=addtxt(sl,$1);
              sl=addtxt(sl,"(");
-             sl=addsl(sl,$4->sl);
+             sl=addsl(sl,expr_to_sl($4));
              $$=addtxt(sl,")");
            }
          ;
