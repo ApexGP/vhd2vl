@@ -18,6 +18,7 @@ WARNS = -Wall -W
 STANDARD = --std=c99 -D_DEFAULT_SOURCE
 # some older versions of libc might need -D_POSIX_C_SOURCE -D_BSD_SOURCE
 # instead of -D_DEFAULT_SOURCE
+OPTIM = -O2
 
 GIT_BASED_VERS := $(shell git rev-parse --short=8 HEAD)
 ifneq ($(GIT_BASED_VERS),)
@@ -25,7 +26,7 @@ ifneq ($(GIT_BASED_VERS),)
 endif
 
 vhd2vl : lex.yy.c vhd2vl.tab.c
-	$(CC) ${STANDARD} ${WARNS} -O2 -g -o vhd2vl lex.yy.c vhd2vl.tab.c
+	$(CC) ${STANDARD} ${WARNS} ${OPTIM} -g -o vhd2vl lex.yy.c vhd2vl.tab.c
 
 vhd2vl.tab.c : vhd2vl.y def.h
 	bison -d -v -t vhd2vl.y

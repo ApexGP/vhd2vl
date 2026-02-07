@@ -5,6 +5,9 @@ src/*.c
 src/*.h
 src/*.output
 src/vhd2vl
+src/*.gcda
+src/*.gcov
+src/*.gcno
 
 examples/*.o
 examples/*.cf

@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Document mechanism to evaluate code coverage using gcov
+
+set -e
+(cd src && rm -f *.gcda *.gcov *.gcno)
+make -C src clean vhd2vl OPTIM="-O0 -fprofile-arcs -ftest-coverage"
+# creates src/*.gcno
+
+src/vhd2vl || true  # just for the help message
+make test RUN_OPT="--std 1995" || echo "OK: diffs expected in this configuration"
+make test
+# creates src/*.gcda
+
+(cd src && gcov vhd2vl-lex.yy.c vhd2vl-vhd2vl.tab.c)
+# chatter is nice, but the value is in the created src/*.gcov files
+
+echo 'OK, now try "less src/vhd2vl.y.gcov"'
