@@ -455,6 +455,16 @@ slist *s;
   return addtxt(s,r);
 }
 
+static slist *expr_to_sl(expdata *e){
+  if (!e) {
+    return NULL;
+  }
+  if (e->op == 'c') {
+    return addwrap("{", e->sl, "}");
+  }
+  return e->sl;
+}
+
 static slist *build_dec_lit(int width, slist *width_expr, int value){
   slist *sl;
   if (width_expr == NULL) {
@@ -1027,7 +1037,7 @@ slist *emit_io_list(slist *sl)
 %type <sl> portlist genlist architecture
 %type <sl> a_decl a_body p_decl oname
 %type <sl> map_list map_item mvalue sigvalue
-%type <sl> aggregate_item aggregate_list
+%type <sl> aggregate_item
 %type <sl> generic_map_list generic_map_item
 %type <sl> conf exprc sign_list p_body optname gen_optname
 %type <sl> edge
@@ -1040,6 +1050,7 @@ slist *emit_io_list(slist *sl)
 %type <n> updown
 %type <e> expr
 %type <e> simple_expr
+%type <e> aggregate_list
 %type <ss> signal
 %type <txt> opt_is opt_generic opt_entity opt_architecture opt_begin
 %type <txt> generate endgenerate
@@ -1713,7 +1724,7 @@ a_body : rem {$$=addind($1);}
            sl=addtxt(sl,"always @(*) begin\n");
            sl=addsl(sl,indents[indent]);
            sl=addtxt(sl,"  case(");
-           sl=addsl(sl,$3->sl);
+           sl=addsl(sl,expr_to_sl($3));
            free($3);
            sl=addtxt(sl,")\n");
            if($5)
@@ -2362,11 +2373,11 @@ mvalue : STRING {$$=addvec(NULL,$1);}
        | BITVECT '(' {convfunc2_is_port++;} expr ')' {
              /* Type conversion function in port map */
              convfunc2_is_port--;
-             $$=addsl(NULL,$4->sl);
+             $$=addsl(NULL,expr_to_sl($4));
            }
        | CONVFUNC_1 '(' expr ')' {
              /* Type conversion function in port map */
-             $$=addsl(NULL,$3->sl);
+             $$=addsl(NULL,expr_to_sl($3));
            }
        | CONVFUNC_2 '(' expr ',' expr ')' {
              /* Two-argument type conversion in port map */
@@ -2374,7 +2385,7 @@ mvalue : STRING {$$=addvec(NULL,$1);}
              int literal_val = 0;
              slist *lit;
              if (!(expdata_literal_int($3, &literal_val))) {
-               $$=addsl(NULL,$3->sl);
+               $$=addsl(NULL,expr_to_sl($3));
              } else if (expdata_literal_int($5, &width_val)) {
                if (width_val > 0) {
                  if (literal_val == 0) {
@@ -2383,20 +2394,20 @@ mvalue : STRING {$$=addvec(NULL,$1);}
                    $$=lit;
                  } else {
                    lit=build_dec_lit(width_val, NULL, literal_val);
-                   $$=lit ? lit : addsl(NULL,$3->sl);
+                   $$=lit ? lit : addsl(NULL,expr_to_sl($3));
                  }
                } else if (width_val == 0 && literal_val == 0) {
                  free($3);
                  free($5);
                  $$=NULL; /* zero-width: drop from concat */
                } else {
-                 $$=addsl(NULL,$3->sl);
+                 $$=addsl(NULL,expr_to_sl($3));
                }
              } else if (literal_val >= 0) {
                lit=build_dec_lit(0, $5->sl, literal_val);
-               $$=lit ? lit : addsl(NULL,$3->sl);
+               $$=lit ? lit : addsl(NULL,expr_to_sl($3));
              } else {
-               $$=addsl(NULL,$3->sl);
+               $$=addsl(NULL,expr_to_sl($3));
              }
            }
        ;
@@ -2414,7 +2425,7 @@ generic_map_list : rem generic_map_item {
              $$=addsl(sl,$4);
            }
          | rem expr {  /* only allow a single un-named map item */
-             $$=addsl(NULL,$2->sl);
+             $$=addsl(NULL,expr_to_sl($2));
            }
          ;
 
@@ -2423,7 +2434,7 @@ generic_map_item : NAME '=' '>' expr {
              sl=addtxt(NULL,".");
              sl=addtxt(sl,$1);
              sl=addtxt(sl,"(");
-             sl=addsl(sl,$4->sl);
+             sl=addsl(sl,expr_to_sl($4));
              $$=addtxt(sl,")");
            }
          ;
@@ -2557,37 +2568,8 @@ expr : signal {
            $$=e;
          }
      | '(' aggregate_list ')' {
-        expdata *e;
-          e=xmalloc(sizeof(expdata));
-          e->op='t'; /* Terminal symbol */
-          e->sl=addwrap("{",$2,"}");
-          $$=e;
+          $$=$2;
         }
-     | '(' OTHERS '=' '>' expr ')' {
-         expdata *e;
-           e=xmalloc(sizeof(expdata));
-           e->op='o'; /* others */
-           e->sl=addothers(NULL,$5->sl);
-           $$=e;
-         }
-     | '(' expr DOWNTO expr '=' '>' expr ')' {
-         /* Aggregate expression: (high downto low => value) */
-         /* Translates to Verilog: {width{value}} */
-         expdata *e;
-         e=xmalloc(sizeof(expdata));
-         e->op='t'; /* Terminal symbol */
-         e->sl=aggregate($2,$4,$7);
-         $$=e;
-         }
-     | '(' expr TO expr '=' '>' expr ')' {
-         /* Aggregate expression: (low to high => value) */
-         /* Translates to Verilog: {width{value}} */
-         expdata *e;
-         e=xmalloc(sizeof(expdata));
-         e->op='t'; /* Terminal symbol */
-         e->sl=aggregate($4,$2,$7);
-         $$=e;
-         }
      | expr '&' expr { /* Vector chaining a.k.a. bit concatenation */
          slist *sl;
          int lhsw = ($1->op == 's' || $1->op == 'n') ? $1->value : -1;
@@ -2789,17 +2771,21 @@ aggregate_item : OTHERS '=' '>' expr {
       }
     ;
 
-aggregate_list : aggregate_item ',' aggregate_item {
-        slist *sl;
-        sl=addsl(NULL,$1);
-        sl=addtxt(sl,",");
-        $$=addsl(sl,$3);
+aggregate_list : aggregate_item {
+      expdata *e;
+        e=xmalloc(sizeof(expdata));
+        e->op='t';  /* Terminal symbol */
+        e->sl=$1;
+        $$=e;
       }
     | aggregate_item ',' aggregate_list {
         slist *sl;
         sl=addsl(NULL,$1);
         sl=addtxt(sl,",");
-        $$=addsl(sl,$3);
+        sl=addsl(sl,$3->sl);
+        $3->sl=sl;
+        $3->op='c';  /* Chain */
+        $$=$3;
       }
     ;
 
