@@ -582,6 +582,27 @@ slist *addrem(slist *sl, slist *rem)
   return sl;
 }
 
+slist *build_compare(expdata*left,const char *op,expdata*right)
+{
+  slist *sl;
+  if(left->op == 'c')
+    sl=addwrap("{",left->sl,"}");
+  else if(left->op != 't')
+    sl=addwrap("(",left->sl,")");
+  else
+    sl=left->sl;
+  sl=addtxt(sl,op);
+  if(right->op == 'c')
+    sl=addsl(sl,addwrap("{",right->sl,"}"));
+  else if(right->op != 't')
+    sl=addsl(sl,addwrap("(",right->sl,")"));
+  else
+    sl=addsl(sl,right->sl);
+  free(left);
+  free(right);
+  return sl;
+}
+
 sglist *lookup(sglist *sg,char *s){
   for(;;){
     if(sg == NULL || strcmp(sg->name,s)==0)
@@ -2829,106 +2850,22 @@ exprc : conf { $$=$1; }
 
 /* Comparisons */
 conf : expr '=' expr %prec EQUAL {
-       slist *sl;
-         if($1->op == 'c')
-           sl=addwrap("{",$1->sl,"} == ");
-         else if($1->op != 't')
-           sl=addwrap("(",$1->sl,") == ");
-         else
-           sl=addtxt($1->sl," == ");
-         if($3->op == 'c')
-           $$=addsl(sl,addwrap("{",$3->sl,"}"));
-         else if($3->op != 't')
-           $$=addsl(sl,addwrap("(",$3->sl,")"));
-         else
-           $$=addsl(sl,$3->sl);
-         free($1);
-         free($3);
+       $$=build_compare($1," == ",$3);
        }
      | expr '>' expr {
-       slist *sl;
-         if($1->op == 'c')
-           sl=addwrap("{",$1->sl,"} > ");
-         else if($1->op != 't')
-           sl=addwrap("(",$1->sl,") > ");
-         else
-           sl=addtxt($1->sl," > ");
-         if($3->op == 'c')
-           $$=addsl(sl,addwrap("{",$3->sl,"}"));
-         else if($3->op != 't')
-           $$=addsl(sl,addwrap("(",$3->sl,")"));
-         else
-           $$=addsl(sl,$3->sl);
-         free($1);
-         free($3);
+       $$=build_compare($1," > ",$3);
        }
      | expr '>' '=' expr %prec BIGEQ {
-       slist *sl;
-         if($1->op == 'c')
-           sl=addwrap("{",$1->sl,"} >= ");
-         else if($1->op != 't')
-           sl=addwrap("(",$1->sl,") >= ");
-         else
-           sl=addtxt($1->sl," >= ");
-         if($4->op == 'c')
-           $$=addsl(sl,addwrap("{",$4->sl,"}"));
-         else if($4->op != 't')
-           $$=addsl(sl,addwrap("(",$4->sl,")"));
-         else
-           $$=addsl(sl,$4->sl);
-         free($1);
-         free($4);
+       $$=build_compare($1," >= ",$4);
        }
      | expr '<' expr {
-       slist *sl;
-         if($1->op == 'c')
-           sl=addwrap("{",$1->sl,"} < ");
-         else if($1->op != 't')
-           sl=addwrap("(",$1->sl,") < ");
-         else
-           sl=addtxt($1->sl," < ");
-         if($3->op == 'c')
-           $$=addsl(sl,addwrap("{",$3->sl,"}"));
-         else if($3->op != 't')
-           $$=addsl(sl,addwrap("(",$3->sl,")"));
-         else
-           $$=addsl(sl,$3->sl);
-         free($1);
-         free($3);
+       $$=build_compare($1," < ",$3);
        }
      | expr '<' '=' expr %prec LESSEQ {
-       slist *sl;
-         if($1->op == 'c')
-           sl=addwrap("{",$1->sl,"} <= ");
-         else if($1->op != 't')
-           sl=addwrap("(",$1->sl,") <= ");
-         else
-           sl=addtxt($1->sl," <= ");
-         if($4->op == 'c')
-           $$=addsl(sl,addwrap("{",$4->sl,"}"));
-         else if($4->op != 't')
-           $$=addsl(sl,addwrap("(",$4->sl,")"));
-         else
-           $$=addsl(sl,$4->sl);
-         free($1);
-         free($4);
+       $$=build_compare($1," <= ",$4);
        }
      | expr '/' '=' expr %prec NOTEQ {
-       slist *sl;
-         if($1->op == 'c')
-           sl=addwrap("{",$1->sl,"} != ");
-         else if($1->op != 't')
-           sl=addwrap("(",$1->sl,") != ");
-         else
-           sl=addtxt($1->sl," != ");
-         if($4->op == 'c')
-           $$=addsl(sl,addwrap("{",$4->sl,"}"));
-         else if($4->op != 't')
-           $$=addsl(sl,addwrap("(",$4->sl,")"));
-         else
-           $$=addsl(sl,$4->sl);
-         free($1);
-         free($4);
+       $$=build_compare($1," != ",$4);
        }
      ;
 
