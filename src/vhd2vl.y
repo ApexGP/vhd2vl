@@ -89,6 +89,7 @@ char wire[]="wire";
 char reg[]="reg";
 int dowith=0;
 int convfunc2_is_port=0;
+int convfunc1_sgn=0;
 slist *slwith;
 
 /* Indentation variables */
@@ -465,6 +466,13 @@ static slist *expr_to_sl(expdata *e){
   return e->sl;
 }
 
+static slist *wrap_sgn_expr(expdata *e, int is_signed){
+  slist *sl;
+  sl=addtxt(NULL, is_signed ? "$signed(" : "$unsigned(");
+  sl=addsl(sl,expr_to_sl(e));
+  return addtxt(sl,")");
+}
+
 static slist *build_dec_lit(int width, slist *width_expr, int value){
   slist *sl;
   if (width_expr == NULL) {
@@ -689,6 +697,9 @@ const char *inout_string(int type)
 
 int prec(int op){
   switch(op){
+  case 'S': case 'U': /* signed or unsigned */
+    return 10;
+    break;
   case 'o': /* others */
     return 9;
     break;
@@ -716,7 +727,7 @@ int prec(int op){
   case '|':
     return 1;
     break;
-   default:
+  default :
     return 0;
     break;
   }
@@ -1414,7 +1425,7 @@ type        : BIT {
             | REAL {
                 $$=new_vrange(tSCALAR);
               }
-            | BITVECT '(' vec_range ')' {$$=$3;}
+            | BITVECT '(' vec_range ')' {$$=$3; free($1);}
             | NAME {
               sglist *sg;
 
@@ -2395,10 +2406,13 @@ mvalue : STRING {$$=addvec(NULL,$1);}
              /* Type conversion function in port map */
              convfunc2_is_port--;
              $$=addsl(NULL,expr_to_sl($4));
+             free($1);
            }
-       | CONVFUNC_1 '(' expr ')' {
+       | CONVFUNC_1 '(' {convfunc1_sgn++;} expr ')' {
              /* Type conversion function in port map */
-             $$=addsl(NULL,expr_to_sl($3));
+             convfunc1_sgn--;
+             $$=addsl(NULL,expr_to_sl($4));
+             free($1);
            }
        | CONVFUNC_2 '(' expr ',' expr ')' {
              /* Two-argument type conversion in port map */
@@ -2695,10 +2709,36 @@ expr : signal {
        }
      | BITVECT '(' expr ')' {
        /* single argument type conversion function e.g. std_logic_vector(x) */
-       $$ = addnest($3);
+       /* signed and unsigned are preserved as expr */
+       if ($1 && strcmp($1, "signed") == 0) {
+         if (convfunc1_sgn) {
+           expdata *e=xmalloc(sizeof(expdata));
+           e->op='S';
+           e->sl=wrap_sgn_expr($3,1);
+           free($3);
+           $$=e;
+         } else {
+           $$ = addnest($3);
+         }
+       } else if ($1 && strcmp($1, "unsigned") == 0) {
+         if (convfunc1_sgn) {
+           expdata *e=xmalloc(sizeof(expdata));
+           e->op='U';
+           e->sl=wrap_sgn_expr($3,0);
+           free($3);
+           $$=e;
+         } else {
+           $$ = addnest($3);
+         }
+       } else {
+         $$ = addnest($3);
+       }
+       free($1);
       }
-     | CONVFUNC_1 '(' expr ')' {
-       $$ = addnest($3);
+     | CONVFUNC_1 '(' {convfunc1_sgn=1;} expr ')' {
+       convfunc1_sgn=0;
+       $$ = addnest($4);
+       free($1);
       }
      | CONVFUNC_2 '(' expr ',' expr ')' {
        /* two argument type conversion e.g. to_signed(x, 3) */
@@ -2877,6 +2917,33 @@ simple_expr : signal {
          free($1);
          $$=e;
       }
+     | BITVECT '(' simple_expr ')' {
+         /* signed/unsigned type conversions inside simple_expr */
+         if ($1 && strcmp($1, "signed") == 0) {
+           if (convfunc1_sgn) {
+             expdata *e=xmalloc(sizeof(expdata));
+             e->op='S';
+             e->sl=wrap_sgn_expr($3,1);
+             free($3);
+             $$=e;
+           } else {
+             $$ = addnest($3);
+           }
+         } else if ($1 && strcmp($1, "unsigned") == 0) {
+           if (convfunc1_sgn) {
+             expdata *e=xmalloc(sizeof(expdata));
+             e->op='U';
+             e->sl=wrap_sgn_expr($3,0);
+             free($3);
+             $$=e;
+           } else {
+             $$ = addnest($3);
+           }
+         } else {
+           $$ = addnest($3);
+         }
+         free($1);
+      }
      | STRING {
          expdata *e;
          size_t len = strlen($1);
@@ -2945,13 +3012,15 @@ simple_expr : signal {
      | simple_expr '/' simple_expr {
        $$=addexpr($1,'/'," / ",$3);
       }
-     | CONVFUNC_1 '(' simple_expr ')' {
+     | CONVFUNC_1 '(' {convfunc1_sgn=1;} simple_expr ')' {
        /* one argument type conversion e.g. to_integer(x) */
        expdata *e;
        e=xmalloc(sizeof(expdata));
-       e->sl=addsl(NULL,$3->sl);
+       convfunc1_sgn=0;
+       e->sl=addsl(NULL,$4->sl);
        e->op='e';
        $$=e;
+       free($1);
       }
      | '(' simple_expr ')' {
        expdata *e;

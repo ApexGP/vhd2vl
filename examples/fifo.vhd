@@ -67,12 +67,12 @@ process (clk_WR)
 begin
 	if (rising_edge(clk_WR)) then
 		if ((WR = '1') and (ifull = '0')) then
-			--ram_mem(to_integer(unsigned(add_WR(3 downto 0)))) <= D;
+			ram_mem(to_integer(unsigned(add_WR(3 downto 0)))) <= D;
 		end if;
 	end if;
 end process;
 
-	--Q <= ram_mem(to_integer(unsigned(add_RD(3 downto 0))));
+	Q <= ram_mem(to_integer(unsigned(add_RD(3 downto 0))));
 
 -----------------------------------------
 ----- Write address counter -------------
