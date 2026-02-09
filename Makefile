@@ -20,6 +20,8 @@ PREFIX  ?= /usr/local
 BINDIR  ?= $(PREFIX)/bin
 BINARY   = src/vhd2vl
 
+RUN_OPT = --quiet
+
 all: $(BINARY)
 
 build $(BINARY):
@@ -33,7 +35,7 @@ test: $(BINARY)
 	@rm -fr $(TEMP)/verilog && mkdir -p $(TEMP)/verilog
 	@echo "##### Translating Examples #####################################"
 	@cd examples; $(foreach VHDL,$(VHDLS), echo "Translating: $(VHDL)";\
-	../$(BINARY) --quiet $(VHDL) ../$(TEMP)/verilog/$(basename $(VHDL)).v;)
+	../$(BINARY) $(RUN_OPT) $(VHDL) ../$(TEMP)/verilog/$(basename $(VHDL)).v;)
 	@make -C translated_examples
 	@echo "##### Diff #####################################################"
 	diff -u $(DIFFOPT) translated_examples $(TEMP)/verilog
