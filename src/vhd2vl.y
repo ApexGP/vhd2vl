@@ -2735,8 +2735,8 @@ expr : signal {
        }
        free($1);
       }
-     | CONVFUNC_1 '(' {convfunc1_sgn=1;} expr ')' {
-       convfunc1_sgn=0;
+     | CONVFUNC_1 '(' {convfunc1_sgn++;} expr ')' {
+       convfunc1_sgn--;
        $$ = addnest($4);
        free($1);
       }
@@ -3012,11 +3012,11 @@ simple_expr : signal {
      | simple_expr '/' simple_expr {
        $$=addexpr($1,'/'," / ",$3);
       }
-     | CONVFUNC_1 '(' {convfunc1_sgn=1;} simple_expr ')' {
+     | CONVFUNC_1 '(' {convfunc1_sgn++;} simple_expr ')' {
        /* one argument type conversion e.g. to_integer(x) */
        expdata *e;
        e=xmalloc(sizeof(expdata));
-       convfunc1_sgn=0;
+       convfunc1_sgn--;
        e->sl=addsl(NULL,$4->sl);
        e->op='e';
        $$=e;
