@@ -619,6 +619,38 @@ sglist *lookup(sglist *sg,char *s){
   }
 }
 
+/* Get source width for resize(vec, w) from symbol table. Returns 0 if unknown. */
+static int get_src_width(expdata *e){
+  sglist *sg;
+  if (!e || e->op != 't' || !e->sl || e->sl->type != tTXT || e->sl->slst != NULL) {
+    return 0;
+  }
+  sg = lookup(io_list, e->sl->data.txt);
+  if (!sg) {
+    sg = lookup(sig_list, e->sl->data.txt);
+  }
+  return (sg && sg->range && sg->range->sizeval > 0) ? sg->range->sizeval : 0;
+}
+
+static slist *build_resize(expdata *vec, int width_val, int src_width){
+  slist *sl;
+  if (width_val > src_width) {
+    sl = addtxt(NULL, "{{(");
+    sl = addval(sl, width_val - src_width);
+    sl = addtxt(sl, "){1'b0}},");
+    sl = addsl(sl, expr_to_sl(vec));
+    sl = addtxt(sl, "}");
+  } else if (width_val < src_width) {
+    sl = addsl(NULL, expr_to_sl(vec));
+    sl = addtxt(sl, "[");
+    sl = addval(sl, width_val - 1);
+    sl = addtxt(sl, ":0]");
+  } else {
+    sl = addsl(NULL, expr_to_sl(vec));
+  }
+  return sl;
+}
+
 char *sbottom(slist *sl){
   while(sl->slst != NULL)
     sl=sl->slst;
@@ -2420,7 +2452,22 @@ mvalue : STRING {$$=addvec(NULL,$1);}
              int literal_val = 0;
              slist *lit;
              if (!(expdata_literal_int($3, &literal_val))) {
-               $$=addsl(NULL,expr_to_sl($3));
+               int is_resize = ($1 && strcmp($1, "resize") == 0);
+               int has_width = expdata_literal_int($5, &width_val) && width_val > 0;
+
+               if (is_resize && has_width) {
+                 int src_width = get_src_width($3);
+                 if (src_width > 0) {
+                   $$ = build_resize($3, width_val, src_width);
+                 } else {
+                   $$ = addsl(NULL, expr_to_sl($3));
+                 }
+                 free($3);
+                 free($5);
+               } else {
+                 $$ = addsl(NULL, expr_to_sl($3));
+                 free($5);
+               }
              } else if (expdata_literal_int($5, &width_val)) {
                if (width_val > 0) {
                  if (literal_val == 0) {
@@ -2444,6 +2491,7 @@ mvalue : STRING {$$=addvec(NULL,$1);}
              } else {
                $$=addsl(NULL,expr_to_sl($3));
              }
+             free($1);
            }
        ;
 
@@ -2741,13 +2789,31 @@ expr : signal {
        free($1);
       }
      | CONVFUNC_2 '(' expr ',' expr ')' {
-       /* two argument type conversion e.g. to_signed(x, 3) */
+       /* two argument type conversion: to_signed(x,3), to_unsigned(x,3), resize(vec,w) */
        int width_val = 0;
        int literal_val = 0;
 
        if (!(expdata_literal_int($3, &literal_val))) {
-         $$ = addnest($3);
-         free($5);
+         /* $3 is vector: resize(vec,w) or pass-through */
+         int is_resize = ($1 && strcmp($1, "resize") == 0);
+         int has_width = expdata_literal_int($5, &width_val) && width_val > 0;
+         if (is_resize && has_width) {
+           int src_width = get_src_width($3);
+           if (src_width > 0) {
+             expdata *e=xmalloc(sizeof(expdata));
+             e->op='t';
+             e->sl=build_resize($3, width_val, src_width);
+             free($3);
+             free($5);
+             $$=e;
+           } else {
+             $$ = addnest($3);
+             free($5);
+           }
+         } else {
+           $$ = addnest($3);
+           free($5);
+         }
        } else if (expdata_literal_int($5, &width_val)) {
          if (literal_val < 0) {
            if (width_val > 0) {
@@ -2811,6 +2877,7 @@ expr : signal {
          $$ = addnest($3);
          free($5);
        }
+       free($1);
       }
      | '(' expr ')' {
        $$ = addnest($2);
