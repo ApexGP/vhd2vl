@@ -28,7 +28,7 @@ wire foo;
 reg [63:0] sr;
 wire [31:0] iparam;
 
-  assign iparam = param;
+  assign iparam = $unsigned(param);
   always @(posedge clk) begin
       // dout <= std_logic_vector(to_unsigned(1,bus_width));
     if(we == 1'b1) begin

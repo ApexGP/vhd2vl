@@ -137,7 +137,7 @@ static void replace_dash(char *s);
 "signed" |
 "unsigned" |
 "std_logic_vector" |
-"std_ulogic_vector"               { return BITVECT; }
+"std_ulogic_vector"               { yylval.txt=xstrdup(yytext); return BITVECT; }
 "real"                            { return REAL; }
 "resize" |
 "to_signed" |
@@ -145,7 +145,7 @@ static void replace_dash(char *s);
 "conv_std_logic_vector" |
 "conv_std_ulogic_vector"          { return CONVFUNC_2; }
 "to_integer" |
-"conv_integer"                    { return CONVFUNC_1; }
+"conv_integer"                    { yylval.txt=xstrdup(yytext); return CONVFUNC_1; }
 
 "shift_left"                      { return SHIFT_LEFT; }
 "shift_right"                     { return SHIFT_RIGHT; }
