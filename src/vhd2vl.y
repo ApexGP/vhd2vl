@@ -73,6 +73,7 @@ int timescale_emitted=0;  /* Track if timescale has been output */
 sglist *io_list=NULL;
 sglist *sig_list=NULL;
 sglist *type_list=NULL;
+sglist *param_list=NULL;  /* consts and params for width lookup */
 blknamelist *blkname_list=NULL;
 
 /* need a stack of clock-edges because all edges are processed before all processes are processed.
@@ -91,6 +92,47 @@ int dowith=0;
 int convfunc2_is_port=0;
 int convfunc1_sgn=0;
 slist *slwith;
+
+/* For port map: component being instantiated and formal port name (for width lookup) */
+typedef struct { char *compnt; char *formal; } portmap_formal_t;
+static portmap_formal_t portmap_ctx = { NULL, NULL };
+
+typedef struct entity_ports {
+  char *name;
+  sglist *ports;
+  struct entity_ports *next;
+} entity_ports_t;
+static entity_ports_t *entity_ports_list = NULL;
+
+sglist *lookup(sglist *sg, char *s);
+
+/* Port map: lookup formal port width from entity. */
+static int lookup_formal_width(const char *compnt, const char *formal) {
+  entity_ports_t *ep;
+  sglist *sg;
+  vrange *r;
+
+  for (ep = entity_ports_list; ep && strcmp(ep->name, compnt) != 0; ep = ep->next) {
+    /* continue searching */
+  }
+  if (!ep) {
+    return 0;
+  }
+
+  sg = lookup(ep->ports, (char*)formal);
+  if (!sg || !sg->range) {
+    return 0;
+  }
+
+  r = sg->range;
+  if (r->sizeval > 0) {
+    return r->sizeval;
+  }
+  if (r->vtype == tSCALAR && r->nhi && r->nlo) {
+    return 32; /* FORMAL INTEGER */
+  }
+  return 0;
+}
 
 /* Indentation variables */
 int indent=0;
@@ -630,6 +672,52 @@ static int get_src_width(expdata *e){
     sg = lookup(sig_list, e->sl->data.txt);
   }
   return (sg && sg->range && sg->range->sizeval > 0) ? sg->range->sizeval : 0;
+}
+
+/* Port map: $signed(inner)/$unsigned(inner) -> {{ext{sign_or_zero}}, expr} when formal needs wider. */
+static slist *build_conv_portmap_ext(expdata *e, int tgt) {
+  slist  *sl;
+  slist  *inner;
+  sglist *sg;
+  int src, ext;
+
+  if (!e || tgt <= 0 || (e->op != 'S' && e->op != 'U') || !e->sl) {
+    return addsl(NULL, expr_to_sl(e));
+  }
+
+  for (sl = e->sl; sl; sl = sl->slst) {
+    if (sl->type == tSLIST)
+      break;
+  }
+  if (!sl || !sl->data.sl || sl->data.sl->type != tTXT || sl->data.sl->slst) {
+    return addsl(NULL, expr_to_sl(e));
+  }
+  inner = sl->data.sl;
+
+  /* Resolve inner id in port/signal/param scope to get bit width */
+  sg = lookup(io_list, inner->data.txt);
+  sg = sg ? sg : lookup(sig_list, inner->data.txt);
+  sg = sg ? sg : lookup(param_list, inner->data.txt);
+  src = (sg && sg->range && sg->range->sizeval > 0) ? sg->range->sizeval : 0;
+  if (src <= 0 || tgt <= src) {
+    return addsl(NULL, expr_to_sl(e));
+  }
+
+  ext = tgt - src;
+  sl = addtxt(NULL, "{{");
+  sl = addval(sl, ext);
+  sl = addtxt(sl, "{");
+  if (e->op == 'S') {
+    sl = addsl(sl, inner);
+    sl = addtxt(sl, "[");
+    sl = addval(sl, src - 1);
+    sl = addtxt(sl, "]}},");
+  } else {
+    sl = addtxt(sl, "1'b0}},");
+  }
+  sl = addsl(sl, expr_to_sl(e));
+  sl = addtxt(sl, "}");
+  return sl;
 }
 
 static slist *build_resize(expdata *vec, int width_val, int src_width){
@@ -1264,6 +1352,13 @@ entity    : ENTITY NAME IS rem PORT '(' rem portlist ')' ';' rem END opt_entity 
               }
               sl=addtxt(sl,"\n");
               sl=addsl(sl,$11); /* rem2 */
+              /* Preserve entity ports for port map formal width lookup */
+              { entity_ports_t *ep=xmalloc(sizeof(entity_ports_t));
+                ep->name=xstrdup($2);
+                ep->ports=io_list;
+                ep->next=entity_ports_list;
+                entity_ports_list=ep;
+              }
               $$=addtxt(sl,"\n");
             }
  /*         1      2    3  4       5        6   7  8         9  10  11   12      13  14  15       16   17 18  19  20  21    22 */
@@ -1293,6 +1388,13 @@ entity    : ENTITY NAME IS rem PORT '(' rem portlist ')' ';' rem END opt_entity 
               }
               sl=addtxt(sl,"\n");
               sl=addsl(sl,$19); /* rem2 */
+              /* Preserve entity ports for port map formal width lookup */
+              { entity_ports_t *ep=xmalloc(sizeof(entity_ports_t));
+                ep->name=xstrdup($2);
+                ep->ports=io_list;
+                ep->next=entity_ports_list;
+                entity_ports_list=ep;
+              }
               $$=addtxt(sl,"\n");
             }
           ;
@@ -1642,12 +1744,18 @@ a_decl    : {$$=NULL;}
               $$=addrem(sl,$10);
             }
           | a_decl CONSTANT NAME ':' type ':' '=' expr ';' rem {
-            slist * sl;
+            slist *sl;
+            sglist *p;
               sl=addtxt($1,"parameter ");
               sl=addtxt(sl,$3);
               sl=addtxt(sl," = ");
               sl=addsl(sl,$8->sl);
               sl=addtxt(sl,";");
+              p=xmalloc(sizeof(sglist));
+              p->name=$3;
+              p->range=$5;
+              p->next=param_list;
+              param_list=p;
               $$=addrem(sl,$10);
             }
           | a_decl TYPE NAME IS '(' s_list ')' ';' rem {
@@ -1808,19 +1916,19 @@ a_body : rem {$$=addind($1);}
            $$=addsl(sl,$11);
          }
        /* 1   2   3     4  5   6    7    8   9         10     11  12  13  14       15 */
-       | rem NAME ':' NAME rem PORT MAP '(' doindent map_list rem ')' ';' unindent a_body {
+       | rem NAME ':' NAME rem PORT MAP '(' doindent { portmap_ctx.compnt=$4; } map_list rem ')' ';' unindent a_body {
          slist *sl;
            sl=addsl($1,indents[indent]);
            sl=addtxt(sl,$4); /* NAME2 */
            sl=addtxt(sl," ");
            sl=addtxt(sl,$2); /* NAME1 */
            sl=addtxt(sl,"(\n");
-           sl=addsl(sl,$10);  /* map_list */
+           sl=addsl(sl,$11);  /* map_list */
            sl=addtxt(sl,");\n\n");
-           $$=addsl(sl,$15); /* a_body */
+           $$=addsl(sl,$16); /* a_body */
          }
        /* 1   2   3     4  5   6        7  8    9       10               11  12  13       14   15  16  17       18       19  20  21       22 */
-       | rem NAME ':' NAME rem GENERIC MAP '(' doindent generic_map_list ')' rem unindent PORT MAP '(' doindent map_list ')' ';' unindent a_body {
+       | rem NAME ':' NAME rem GENERIC MAP '(' doindent generic_map_list ')' rem unindent PORT MAP '(' doindent { portmap_ctx.compnt=$4; } map_list ')' ';' unindent a_body {
          slist *sl;
            sl=addsl($1,indents[indent]);
            sl=addtxt(sl,$4); /* NAME2 (component name) */
@@ -1834,9 +1942,9 @@ a_body : rem {$$=addind($1);}
            sl=addsl(sl,indents[indent]);
            sl=addtxt(sl,$2); /* NAME1 (instance name) */
            sl=addtxt(sl,"(\n");
-           sl=addsl(sl,$18); /* map_list */
+           sl=addsl(sl,$19); /* map_list */
            sl=addtxt(sl,");\n\n");
-           $$=addsl(sl,$22); /* a_body */
+           $$=addsl(sl,$23); /* a_body */
          }
        | optname PROCESS '(' sign_list ')' p_decl opt_is BEGN doindent p_body END PROCESS oname ';' unindent a_body {
          slist *sl;
@@ -2413,12 +2521,12 @@ map_list : rem map_item {
          ;
 
 map_item : mvalue {$$=$1;}
-         | NAME '=' '>' mvalue {
+         | NAME '=' '>' { portmap_ctx.formal=$1; } mvalue {
            slist *sl;
              sl=addtxt(NULL,".");
              sl=addtxt(sl,$1);
              sl=addtxt(sl,"(");
-             sl=addsl(sl,$4);
+             sl=addsl(sl,$5);
              $$=addtxt(sl,")");
            }
          ;
@@ -2442,8 +2550,12 @@ mvalue : STRING {$$=addvec(NULL,$1);}
            }
        | CONVFUNC_1 '(' {convfunc1_sgn++;} expr ')' {
              /* Type conversion function in port map */
+             int tgt = 0;
              convfunc1_sgn--;
-             $$=addsl(NULL,expr_to_sl($4));
+             if (portmap_ctx.compnt && portmap_ctx.formal) {
+               tgt = lookup_formal_width(portmap_ctx.compnt, portmap_ctx.formal);
+             }
+             $$ = (tgt > 0) ? build_conv_portmap_ext($4, tgt) : addsl(NULL, expr_to_sl($4));
              free($1);
            }
        | CONVFUNC_2 '(' expr ',' expr ')' {
