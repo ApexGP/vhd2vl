@@ -668,9 +668,8 @@ static int get_src_width(expdata *e){
     return 0;
   }
   sg = lookup(io_list, e->sl->data.txt);
-  if (!sg) {
-    sg = lookup(sig_list, e->sl->data.txt);
-  }
+  sg = sg ? sg : lookup(sig_list, e->sl->data.txt);
+  sg = sg ? sg : lookup(param_list, e->sl->data.txt);
   return (sg && sg->range && sg->range->sizeval > 0) ? sg->range->sizeval : 0;
 }
 
@@ -710,7 +709,12 @@ static slist *build_conv_portmap_ext(expdata *e, int tgt) {
   if (e->op == 'S') {
     sl = addsl(sl, inner);
     sl = addtxt(sl, "[");
-    sl = addval(sl, src - 1);
+    /* Use declared MSB (nhi) for sign bit; src-1 assumes 0-based [w-1:0] */
+    if (sg && sg->range && sg->range->nhi) {
+      sl = addsl(sl, sg->range->nhi);
+    } else {
+      sl = addval(sl, src - 1);
+    }
     sl = addtxt(sl, "]}},");
   } else {
     sl = addtxt(sl, "1'b0}},");
@@ -722,6 +726,8 @@ static slist *build_conv_portmap_ext(expdata *e, int tgt) {
 
 static slist *build_resize(expdata *vec, int width_val, int src_width){
   slist *sl;
+  sglist *sg;
+  vrange *r;
   if (width_val > src_width) {
     sl = addtxt(NULL, "{{(");
     sl = addval(sl, width_val - src_width);
@@ -729,10 +735,36 @@ static slist *build_resize(expdata *vec, int width_val, int src_width){
     sl = addsl(sl, expr_to_sl(vec));
     sl = addtxt(sl, "}");
   } else if (width_val < src_width) {
-    sl = addsl(NULL, expr_to_sl(vec));
-    sl = addtxt(sl, "[");
-    sl = addval(sl, width_val - 1);
-    sl = addtxt(sl, ":0]");
+    /* [width_val-1:0] assumes 0-based vec; wrong for e.g. [15:8]. Use nlo when known. */
+    sg = NULL;
+    if (vec && vec->op == 't' && vec->sl && vec->sl->type == tTXT && !vec->sl->slst) {
+      sg = lookup(io_list, vec->sl->data.txt);
+      sg = sg ? sg : lookup(sig_list, vec->sl->data.txt);
+      sg = sg ? sg : lookup(param_list, vec->sl->data.txt);
+    }
+    r = (sg && sg->range) ? sg->range : NULL;
+    if (r && r->nlo) {
+      slist *n = r->nlo;
+      int nlo_zero = (n && !n->slst && ((n->type == tVAL && n->data.val == 0) ||
+                                        (n->type == tTXT && n->data.txt && strcmp(n->data.txt, "0") == 0)));
+      sl = addsl(NULL, expr_to_sl(vec));
+      sl = addtxt(sl, "[");
+      if (nlo_zero) {
+        sl = addval(sl, width_val - 1);
+        sl = addtxt(sl, ":0]");
+      } else {
+        sl = addtxt(sl, "(");
+        sl = addsl(sl, r->nlo);
+        sl = addtxt(sl, ")+");
+        sl = addval(sl, width_val - 1);
+        sl = addtxt(sl, ":");
+        sl = addsl(sl, r->nlo);
+        sl = addtxt(sl, "]");
+      }
+    } else {
+      /* Fall back to unmodified expr when nlo unknown; [w-1:0] can be wrong for non-0-based */
+      sl = addsl(NULL, expr_to_sl(vec));
+    }
   } else {
     sl = addsl(NULL, expr_to_sl(vec));
   }
@@ -1916,7 +1948,7 @@ a_body : rem {$$=addind($1);}
            $$=addsl(sl,$11);
          }
        /* 1   2   3     4  5   6    7    8   9         10     11  12  13  14       15 */
-       | rem NAME ':' NAME rem PORT MAP '(' doindent { portmap_ctx.compnt=$4; } map_list rem ')' ';' unindent a_body {
+       | rem NAME ':' NAME rem PORT MAP '(' doindent { portmap_ctx.compnt=$4; portmap_ctx.formal=NULL; } map_list rem ')' ';' unindent a_body {
          slist *sl;
            sl=addsl($1,indents[indent]);
            sl=addtxt(sl,$4); /* NAME2 */
@@ -1928,7 +1960,7 @@ a_body : rem {$$=addind($1);}
            $$=addsl(sl,$16); /* a_body */
          }
        /* 1   2   3     4  5   6        7  8    9       10               11  12  13       14   15  16  17       18       19  20  21       22 */
-       | rem NAME ':' NAME rem GENERIC MAP '(' doindent generic_map_list ')' rem unindent PORT MAP '(' doindent { portmap_ctx.compnt=$4; } map_list ')' ';' unindent a_body {
+       | rem NAME ':' NAME rem GENERIC MAP '(' doindent generic_map_list ')' rem unindent PORT MAP '(' doindent { portmap_ctx.compnt=$4; portmap_ctx.formal=NULL; } map_list ')' ';' unindent a_body {
          slist *sl;
            sl=addsl($1,indents[indent]);
            sl=addtxt(sl,$4); /* NAME2 (component name) */
@@ -2511,12 +2543,12 @@ map_list : rem map_item {
            slist *sl;
            sl=addsl($1,indents[indent]);
            $$=addsl(sl,$2);}
-         | rem map_item ',' map_list {
+         | rem map_item ',' { portmap_ctx.formal=NULL; } map_list {
            slist *sl;
              sl=addsl($1,indents[indent]);
              sl=addsl(sl,$2);
              sl=addtxt(sl,",\n");
-             $$=addsl(sl,$4);
+             $$=addsl(sl,$5);
            }
          ;
 
