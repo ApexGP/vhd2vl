@@ -41,7 +41,7 @@ parameter [31:0] data_width=8;
 
 
 
-wire [data_width - 1:0] ram_mem[15:0];
+reg [data_width - 1:0] ram_mem[15:0];
 wire iempty;
 wire ifull;
 wire add_WR_CE;
@@ -65,11 +65,11 @@ reg isrst_r;
   //------------------------------------------
   always @(posedge clk_WR) begin
     if(((WR == 1'b1) && (ifull == 1'b0))) begin
-      //ram_mem(to_integer(unsigned(add_WR(3 downto 0)))) <= D;
+      ram_mem[$unsigned(add_WR[3:0])] <= D;
     end
   end
 
-  //Q <= ram_mem(to_integer(unsigned(add_RD(3 downto 0))));
+  assign Q = ram_mem[$unsigned(add_RD[3:0])];
   //---------------------------------------
   //--- Write address counter -------------
   //---------------------------------------
