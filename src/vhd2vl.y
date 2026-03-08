@@ -104,7 +104,7 @@ typedef struct entity_ports {
 } entity_ports_t;
 static entity_ports_t *entity_ports_list = NULL;
 
-sglist *lookup(sglist *sg, char *s);
+sglist *lookup(sglist *sg, const char *s);
 
 /* Port map: lookup formal port width from entity. */
 static int lookup_formal_width(const char *compnt, const char *formal) {
@@ -112,14 +112,13 @@ static int lookup_formal_width(const char *compnt, const char *formal) {
   sglist *sg;
   vrange *r;
 
-  for (ep = entity_ports_list; ep && strcmp(ep->name, compnt) != 0; ep = ep->next) {
-    /* continue searching */
-  }
+  ep = entity_ports_list;
+  while (ep && strcmp(ep->name, compnt) != 0) ep = ep->next;
   if (!ep) {
     return 0;
   }
 
-  sg = lookup(ep->ports, (char*)formal);
+  sg = lookup(ep->ports, formal);
   if (!sg || !sg->range) {
     return 0;
   }
@@ -653,7 +652,7 @@ slist *build_compare(expdata*left,const char *op,expdata*right)
   return sl;
 }
 
-sglist *lookup(sglist *sg,char *s){
+sglist *lookup(sglist *sg, const char *s){
   for(;;){
     if(sg == NULL || strcmp(sg->name,s)==0)
       return sg;
@@ -662,20 +661,26 @@ sglist *lookup(sglist *sg,char *s){
 }
 
 /* Get source width for resize(vec, w) from symbol table. Returns 0 if unknown. */
-static int get_src_width(expdata *e){
+static sglist *get_src_sglist(expdata *e){
   sglist *sg;
   if (!e || e->op != 't' || !e->sl || e->sl->type != tTXT || e->sl->slst != NULL) {
-    return 0;
+    return NULL;
   }
   sg = lookup(io_list, e->sl->data.txt);
   sg = sg ? sg : lookup(sig_list, e->sl->data.txt);
   sg = sg ? sg : lookup(param_list, e->sl->data.txt);
+  return sg;
+}
+
+static int get_src_width(expdata *e){
+  sglist *sg = get_src_sglist(e);
   return (sg && sg->range && sg->range->sizeval > 0) ? sg->range->sizeval : 0;
 }
 
 /* Port map: $signed(inner)/$unsigned(inner) -> {{ext{sign_or_zero}}, expr} when formal needs wider. */
 static slist *build_conv_portmap_ext(expdata *e, int tgt) {
   slist  *sl;
+  slist  *node;
   slist  *inner;
   sglist *sg;
   int src, ext;
@@ -684,14 +689,14 @@ static slist *build_conv_portmap_ext(expdata *e, int tgt) {
     return addsl(NULL, expr_to_sl(e));
   }
 
-  for (sl = e->sl; sl; sl = sl->slst) {
-    if (sl->type == tSLIST)
+  for (node = e->sl; node; node = node->slst) {
+    if (node->type == tSLIST)
       break;
   }
-  if (!sl || !sl->data.sl || sl->data.sl->type != tTXT || sl->data.sl->slst) {
+  if (!node || !node->data.sl || node->data.sl->type != tTXT || node->data.sl->slst) {
     return addsl(NULL, expr_to_sl(e));
   }
-  inner = sl->data.sl;
+  inner = node->data.sl;
 
   /* Resolve inner id in port/signal/param scope to get bit width */
   sg = lookup(io_list, inner->data.txt);
@@ -729,6 +734,9 @@ static slist *build_resize(expdata *vec, int width_val, int src_width){
   sglist *sg;
   vrange *r;
   if (width_val > src_width) {
+    /* KNOWN LIMITATION: always zero-extends. VHDL resize() on a signed vector
+     * should sign-extend (replicate MSB), but sglist does not yet track the
+     * signed/unsigned type of each signal, so we cannot distinguish here. */
     sl = addtxt(NULL, "{{(");
     sl = addval(sl, width_val - src_width);
     sl = addtxt(sl, "){1'b0}},");
@@ -736,17 +744,12 @@ static slist *build_resize(expdata *vec, int width_val, int src_width){
     sl = addtxt(sl, "}");
   } else if (width_val < src_width) {
     /* [width_val-1:0] assumes 0-based vec; wrong for e.g. [15:8]. Use nlo when known. */
-    sg = NULL;
-    if (vec && vec->op == 't' && vec->sl && vec->sl->type == tTXT && !vec->sl->slst) {
-      sg = lookup(io_list, vec->sl->data.txt);
-      sg = sg ? sg : lookup(sig_list, vec->sl->data.txt);
-      sg = sg ? sg : lookup(param_list, vec->sl->data.txt);
-    }
+    sg = get_src_sglist(vec);
     r = (sg && sg->range) ? sg->range : NULL;
     if (r && r->nlo) {
       slist *n = r->nlo;
-      int nlo_zero = (n && !n->slst && ((n->type == tVAL && n->data.val == 0) ||
-                                        (n->type == tTXT && n->data.txt && strcmp(n->data.txt, "0") == 0)));
+      int nlo_zero = (!n->slst && ((n->type == tVAL && n->data.val == 0) ||
+                                   (n->type == tTXT && n->data.txt && strcmp(n->data.txt, "0") == 0)));
       sl = addsl(NULL, expr_to_sl(vec));
       sl = addtxt(sl, "[");
       if (nlo_zero) {
@@ -762,8 +765,13 @@ static slist *build_resize(expdata *vec, int width_val, int src_width){
         sl = addtxt(sl, "]");
       }
     } else {
-      /* Fall back to unmodified expr when nlo unknown; [w-1:0] can be wrong for non-0-based */
+      /* nlo unknown; assume 0-based and output [w-1:0]. May be wrong for non-0-based vectors. */
+      fprintf(stderr, "WARNING (line %d): resize() truncation: nlo unknown, assuming 0-based; output [%d:0] may be incorrect\n",
+              lineno, width_val - 1);
       sl = addsl(NULL, expr_to_sl(vec));
+      sl = addtxt(sl, "[");
+      sl = addval(sl, width_val - 1);
+      sl = addtxt(sl, ":0]");
     }
   } else {
     sl = addsl(NULL, expr_to_sl(vec));
@@ -1786,6 +1794,8 @@ a_decl    : {$$=NULL;}
               p=xmalloc(sizeof(sglist));
               p->name=$3;
               p->range=$5;
+              p->type=NULL;
+              p->dir=NULL;
               p->next=param_list;
               param_list=p;
               $$=addrem(sl,$10);
@@ -1957,6 +1967,7 @@ a_body : rem {$$=addind($1);}
            sl=addtxt(sl,"(\n");
            sl=addsl(sl,$11);  /* map_list */
            sl=addtxt(sl,");\n\n");
+           portmap_ctx.compnt=NULL;
            $$=addsl(sl,$16); /* a_body */
          }
        /* 1   2   3     4  5   6        7  8    9       10               11  12  13       14   15  16  17       18       19  20  21       22 */
@@ -1976,6 +1987,7 @@ a_body : rem {$$=addind($1);}
            sl=addtxt(sl,"(\n");
            sl=addsl(sl,$19); /* map_list */
            sl=addtxt(sl,");\n\n");
+           portmap_ctx.compnt=NULL;
            $$=addsl(sl,$23); /* a_body */
          }
        | optname PROCESS '(' sign_list ')' p_decl opt_is BEGN doindent p_body END PROCESS oname ';' unindent a_body {
